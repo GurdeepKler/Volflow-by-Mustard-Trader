@@ -111,6 +111,18 @@ function formatCountdownToOpen(now: Date, sessionDate: string): string {
   )}m ${String(secs).padStart(2, '0')}s`;
 }
 
+function formatPremarketSourceLabel(
+  sourceWindow: 'premarket_0400_0930' | 'regular_or_post' | 'none'
+): string {
+  if (sourceWindow === 'premarket_0400_0930') {
+    return '04:00–09:30 pre-mkt';
+  }
+  if (sourceWindow === 'regular_or_post') {
+    return 'Regular/Post (stale)';
+  }
+  return 'No pre-mkt bar';
+}
+
 type BenchSortKey =
   | 'status'
   | 'symbol'
@@ -236,7 +248,11 @@ export const PreMarketShortlistView: React.FC = () => {
       return {
         ...lockedRow,
         premarketPrice: liveRow.premarketPrice ?? lockedRow.premarketPrice,
+        premarketDateNY: liveRow.premarketDateNY ?? lockedRow.premarketDateNY,
         premarketTimeNY: liveRow.premarketTimeNY ?? lockedRow.premarketTimeNY,
+        premarketSourceWindow:
+          liveRow.premarketSourceWindow ?? lockedRow.premarketSourceWindow,
+        premarketStatus: liveRow.premarketStatus ?? lockedRow.premarketStatus,
         gapPctFromClose: liveRow.gapPctFromClose ?? lockedRow.gapPctFromClose,
       };
     });
@@ -872,9 +888,35 @@ export const PreMarketShortlistView: React.FC = () => {
                                 {row.gapPctFromClose.toFixed(2)}%
                               </div>
                             )}
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              {row.premarketDateNY
+                                ? `${row.premarketDateNY} `
+                                : ''}
+                              {row.premarketTimeNY
+                                ? `${row.premarketTimeNY.slice(0, 5)} NY`
+                                : 'No time'}
+                            </div>
+                            <div
+                              className={`text-[10px] ${
+                                row.premarketStatus === 'ok'
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-amber-600 dark:text-amber-400'
+                              }`}
+                            >
+                              {formatPremarketSourceLabel(
+                                row.premarketSourceWindow
+                              )}
+                            </div>
                           </div>
                         ) : (
-                          '—'
+                          <div>
+                            <div>—</div>
+                            <div className="text-[10px] text-slate-400">
+                              {formatPremarketSourceLabel(
+                                row.premarketSourceWindow
+                              )}
+                            </div>
+                          </div>
                         )}
                       </td>
                       <td
@@ -1129,9 +1171,41 @@ export const PreMarketShortlistView: React.FC = () => {
                       {row.sectorName} ({row.sectorSymbol})
                     </td>
                     <td className="py-2.5 px-3 text-right tabular-nums">
-                      {row.premarketPrice !== null
-                        ? `$${row.premarketPrice.toFixed(2)}`
-                        : '—'}
+                      {row.premarketPrice !== null ? (
+                        <div>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">
+                            ${row.premarketPrice.toFixed(2)}
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                            {row.premarketDateNY
+                              ? `${row.premarketDateNY} `
+                              : ''}
+                            {row.premarketTimeNY
+                              ? `${row.premarketTimeNY.slice(0, 5)} NY`
+                              : 'No time'}
+                          </div>
+                          <div
+                            className={`text-[10px] ${
+                              row.premarketStatus === 'ok'
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-amber-600 dark:text-amber-400'
+                            }`}
+                          >
+                            {formatPremarketSourceLabel(
+                              row.premarketSourceWindow
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div>—</div>
+                          <div className="text-[10px] text-slate-400">
+                            {formatPremarketSourceLabel(
+                              row.premarketSourceWindow
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </td>
                     <td
                       className="py-2.5 px-3 text-right tabular-nums"

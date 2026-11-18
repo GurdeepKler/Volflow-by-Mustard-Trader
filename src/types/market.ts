@@ -200,6 +200,7 @@ export interface Intraday15mFeedResult {
   dataStatus: DataStatus;
   fetchedAt: string;
   asOfSession: string | null;
+  fetchedForCompletedSession?: string;
   errorReason?: string;
   sessions: IntradaySession15m[];
 }
@@ -228,6 +229,7 @@ export interface EarningsFeedResult {
   symbol: string;
   dataStatus: DataStatus;
   fetchedAt: string;
+  fetchedForCompletedSession?: string;
   providerConfigured: boolean;
   events: EarningsEvent[];
   errorReason?: string;
@@ -332,8 +334,10 @@ export interface ShortlistCandidateRow {
   levels: ComputedLevels | null;
   health: BenchHealthMetrics;
   premarketPrice: number | null; // P
+  premarketDateNY: string | null;
   premarketTimeNY: string | null;
   premarketSourceWindow: PreMarketQuoteResult['sourceWindow'];
+  premarketStatus: DataStatus;
   gapPctFromClose: number | null; // (P - dMinus1Close) / dMinus1Close * 100
   earningsStatusLabel: string; // e.g., "Clear", "Earnings 2026-11-18 (amc)", "Verify manually"
   earningsUnavailable: boolean;
@@ -407,6 +411,7 @@ export interface SetupLogEntry {
   symbol: string;
   sectorSymbol: string;
   sector: string;
+  shortlistSource: 'locked' | 'none';
   inShortlist: boolean;
   shortlistRank: number | null;
   shortlistScore: number | null;

@@ -252,11 +252,26 @@ export interface DailyFeedFetchResult {
   dataStatus: DataStatus;
   asOfSession: string | null;
   fetchedAt: string;
+  fetchedForCompletedSession?: string;
   errorReason?: string;
   bars: RawOHLCV[];
   lastPrice: number | null;
   exchangeName?: string;
   shortName?: string;
+}
+
+/**
+ * Recomputes a feed's DataStatus at use time against the current most recent completed US session.
+ */
+export function recomputeFeedDataStatus(
+  asOfSession: string | null,
+  rawStatus: DataStatus,
+  expectedCompletedSession: string = getMostRecentCompletedUSSession()
+): DataStatus {
+  if (rawStatus === 'unavailable' || !asOfSession) {
+    return 'unavailable';
+  }
+  return asOfSession < expectedCompletedSession ? 'stale' : 'ok';
 }
 
 /**
@@ -300,6 +315,7 @@ export async function fetchDailyBars1Y(
         dataStatus: 'unavailable',
         asOfSession: null,
         fetchedAt,
+        fetchedForCompletedSession: expectedCompletedSession,
         errorReason: reason,
         bars: [],
         lastPrice: null,
@@ -316,6 +332,7 @@ export async function fetchDailyBars1Y(
         dataStatus: 'unavailable',
         asOfSession: null,
         fetchedAt,
+        fetchedForCompletedSession: expectedCompletedSession,
         errorReason: reason,
         bars: [],
         lastPrice: null,
@@ -332,6 +349,7 @@ export async function fetchDailyBars1Y(
         dataStatus: 'unavailable',
         asOfSession: null,
         fetchedAt,
+        fetchedForCompletedSession: expectedCompletedSession,
         errorReason: reason,
         bars: [],
         lastPrice: null,
@@ -384,6 +402,7 @@ export async function fetchDailyBars1Y(
         dataStatus: 'unavailable',
         asOfSession: null,
         fetchedAt,
+        fetchedForCompletedSession: expectedCompletedSession,
         errorReason: reason,
         bars: [],
         lastPrice: null,
@@ -391,8 +410,11 @@ export async function fetchDailyBars1Y(
     }
 
     const asOfSession = bars[bars.length - 1].date;
-    const dataStatus: DataStatus =
-      asOfSession < expectedCompletedSession ? 'stale' : 'ok';
+    const dataStatus: DataStatus = recomputeFeedDataStatus(
+      asOfSession,
+      'ok',
+      expectedCompletedSession
+    );
 
     const rawRegPrice = result.meta?.regularMarketPrice;
     const lastPrice =
@@ -409,6 +431,7 @@ export async function fetchDailyBars1Y(
       dataStatus,
       asOfSession,
       fetchedAt,
+      fetchedForCompletedSession: expectedCompletedSession,
       bars,
       lastPrice,
       exchangeName,
@@ -423,6 +446,7 @@ export async function fetchDailyBars1Y(
       dataStatus: 'unavailable',
       asOfSession: null,
       fetchedAt,
+      fetchedForCompletedSession: expectedCompletedSession,
       errorReason: reason,
       bars: [],
       lastPrice: null,
@@ -469,6 +493,7 @@ export async function fetchIntraday15m60D(
         symbol,
         dataStatus: 'unavailable',
         fetchedAt,
+        fetchedForCompletedSession: expectedCompletedSession,
         asOfSession: null,
         errorReason: reason,
         sessions: [],
@@ -484,6 +509,7 @@ export async function fetchIntraday15m60D(
         symbol,
         dataStatus: 'unavailable',
         fetchedAt,
+        fetchedForCompletedSession: expectedCompletedSession,
         asOfSession: null,
         errorReason: reason,
         sessions: [],
@@ -499,6 +525,7 @@ export async function fetchIntraday15m60D(
         symbol,
         dataStatus: 'unavailable',
         fetchedAt,
+        fetchedForCompletedSession: expectedCompletedSession,
         asOfSession: null,
         errorReason: reason,
         sessions: [],
@@ -556,6 +583,7 @@ export async function fetchIntraday15m60D(
         symbol,
         dataStatus: 'unavailable',
         fetchedAt,
+        fetchedForCompletedSession: expectedCompletedSession,
         asOfSession: null,
         errorReason: reason,
         sessions: [],
@@ -576,14 +604,18 @@ export async function fetchIntraday15m60D(
     });
 
     const asOfSession = sessions[sessions.length - 1].sessionDate;
-    const dataStatus: DataStatus =
-      asOfSession < expectedCompletedSession ? 'stale' : 'ok';
+    const dataStatus: DataStatus = recomputeFeedDataStatus(
+      asOfSession,
+      'ok',
+      expectedCompletedSession
+    );
 
     recordFeedSuccess('intraday_15m_60d');
     return {
       symbol,
       dataStatus,
       fetchedAt,
+      fetchedForCompletedSession: expectedCompletedSession,
       asOfSession,
       sessions,
     };
@@ -595,6 +627,7 @@ export async function fetchIntraday15m60D(
       symbol,
       dataStatus: 'unavailable',
       fetchedAt,
+      fetchedForCompletedSession: expectedCompletedSession,
       asOfSession: null,
       errorReason: reason,
       sessions: [],
@@ -807,7 +840,8 @@ async function performSingleFinnhubEarningsFetch(
   fromDate: string,
   toDate: string,
   apiKey: string,
-  fetchedAt: string
+  fetchedAt: string,
+  expectedCompletedSession: string
 ): Promise<EarningsFeedResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
@@ -847,6 +881,7 @@ async function performSingleFinnhubEarningsFetch(
         symbol,
         dataStatus: 'unavailable',
         fetchedAt,
+        fetchedForCompletedSession: expectedCompletedSession,
         providerConfigured: false,
         events: [],
         errorReason: reason,
@@ -865,6 +900,7 @@ async function performSingleFinnhubEarningsFetch(
         symbol,
         dataStatus: 'unavailable',
         fetchedAt,
+        fetchedForCompletedSession: expectedCompletedSession,
         providerConfigured: true,
         events: [],
         errorReason: reason,
@@ -898,6 +934,7 @@ async function performSingleFinnhubEarningsFetch(
       symbol,
       dataStatus: 'ok',
       fetchedAt,
+      fetchedForCompletedSession: expectedCompletedSession,
       providerConfigured: true,
       events,
     };
@@ -914,6 +951,7 @@ async function performSingleFinnhubEarningsFetch(
       symbol,
       dataStatus: 'unavailable',
       fetchedAt,
+      fetchedForCompletedSession: expectedCompletedSession,
       providerConfigured: true,
       events: [],
       errorReason: reason,
@@ -929,9 +967,13 @@ async function performSingleFinnhubEarningsFetch(
 export async function fetchEarningsCalendar(
   symbol: string,
   fromDate: string,
-  toDate: string
+  toDate: string,
+  options?: { now?: Date }
 ): Promise<EarningsFeedResult> {
   const fetchedAt = new Date().toISOString();
+  const expectedCompletedSession = getMostRecentCompletedUSSession(
+    options?.now ?? new Date()
+  );
   const apiKey = getSanitizedFinnhubKey();
 
   if (!apiKey) {
@@ -943,6 +985,7 @@ export async function fetchEarningsCalendar(
       symbol,
       dataStatus: 'unavailable',
       fetchedAt,
+      fetchedForCompletedSession: expectedCompletedSession,
       providerConfigured: false,
       events: [],
       errorReason: reason,
@@ -963,6 +1006,7 @@ export async function fetchEarningsCalendar(
       symbol,
       dataStatus: 'unavailable',
       fetchedAt,
+      fetchedForCompletedSession: expectedCompletedSession,
       providerConfigured: false,
       events: [],
       errorReason: 'Earnings check unavailable — verify manually',
@@ -980,7 +1024,8 @@ export async function fetchEarningsCalendar(
         fromDate,
         toDate,
         apiKey,
-        fetchedAt
+        fetchedAt,
+        expectedCompletedSession
       );
     } finally {
       inFlightFinnhubProbe = null;
@@ -993,7 +1038,8 @@ export async function fetchEarningsCalendar(
     fromDate,
     toDate,
     apiKey,
-    fetchedAt
+    fetchedAt,
+    expectedCompletedSession
   );
 }
 

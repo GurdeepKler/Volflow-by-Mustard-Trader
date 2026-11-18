@@ -190,7 +190,12 @@ export const SilentFlipLogPanel: React.FC = () => {
     if (!data) return [];
     return data.entries.filter((e) => {
       if (dateFilter !== 'ALL' && e.date !== dateFilter) return false;
-      if (groupFilter === 'SHORTLISTED' && !e.inShortlist) return false;
+      if (
+        groupFilter === 'SHORTLISTED' &&
+        !(e.shortlistSource === 'locked' && e.inShortlist)
+      ) {
+        return false;
+      }
       if (
         groupFilter === 'SETUPS_ONLY' &&
         e.stageReached !== 'Trigger' &&
@@ -555,16 +560,20 @@ export const SilentFlipLogPanel: React.FC = () => {
                     </td>
 
                     <td className="py-2.5 px-3 whitespace-nowrap font-mono">
-                      {entry.inShortlist ? (
+                      {entry.shortlistSource === 'locked' && entry.inShortlist ? (
                         <span className="px-2 py-0.5 rounded bg-sky-500/15 text-sky-700 dark:text-sky-300 font-semibold text-[11px]">
-                          #{entry.shortlistRank ?? '—'} ·{' '}
+                          Locked #{entry.shortlistRank ?? '—'} ·{' '}
                           {entry.shortlistScore !== null
                             ? entry.shortlistScore.toFixed(1)
                             : '—'}
                         </span>
+                      ) : entry.shortlistSource === 'locked' ? (
+                        <span className="text-slate-500 dark:text-slate-400 text-[11px]">
+                          Locked (Bench)
+                        </span>
                       ) : (
                         <span className="text-slate-400 dark:text-slate-500 text-[11px]">
-                          Bench
+                          No lock
                         </span>
                       )}
                     </td>

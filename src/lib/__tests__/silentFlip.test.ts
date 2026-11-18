@@ -740,12 +740,14 @@ test('Phase 3 checklist: re-grading is deterministic, rulesVersion increments wi
     symbol: 'UBER',
     sectorSymbol: 'XLI',
     sector: 'Industrials',
+    shortlistSource: 'none',
     inShortlist: false,
     shortlistRank: null,
     shortlistScore: null,
     levels: BASE_GRADER_LEVELS,
     sessionBars15m: [c1, c2],
     rules: updatedRules,
+    gradedAt: new Date('2026-11-19T21:30:00Z'), // 16:30 NY on 2026-11-19
     existingManual: {
       taken: true,
       actualEntry: 227.0,
@@ -757,7 +759,7 @@ test('Phase 3 checklist: re-grading is deterministic, rulesVersion increments wi
   assert.equal(newEntryWithV2.rulesVersion, 2);
   assert.equal(firstGrade.rulesVersion, 1);
 
-  // 3) Summary strip separates shortlisted vs not-shortlisted
+  // 3) Summary strip separates shortlisted (shortlistSource === 'locked') vs not-shortlisted
   const summary = summarizeSetupLog([firstGrade, newEntryWithV2]);
   assert.equal(summary.shortlisted.entriesCount, 1);
   assert.equal(summary.shortlisted.triggeredCount, 1);
@@ -770,6 +772,7 @@ test('Phase 3 checklist: re-grading is deterministic, rulesVersion increments wi
   const lines = csv.split('\n');
   assert.equal(lines.length, 3); // Header + 2 entries
   assert.equal(lines[0], SETUP_LOG_CSV_COLUMNS.join(','));
+  assert.ok(SETUP_LOG_CSV_COLUMNS.includes('shortlistSource'));
   // Every stored field on SetupLogEntry is present in SETUP_LOG_CSV_COLUMNS
   const entryKeys = Object.keys(firstGrade);
   for (const k of entryKeys) {
@@ -779,4 +782,153 @@ test('Phase 3 checklist: re-grading is deterministic, rulesVersion increments wi
     );
   }
 });
+
+test('Bug 2: buildShortlist T1 passes ONLY if premarket.nyDate === sessionBeingPrepared AND sourceWindow === premarket_0400_0930', () => {
+  const bench: SilentFlipBenchItem[] = [
+    { symbol: 'WRONG_DATE', name: 'Wrong Premarket Date', sectorSymbol: 'XLK', sectorName: 'Technology' },
+    { symbol: 'WRONG_WINDOW', name: 'Regular Session Bar', sectorSymbol: 'XLC', sectorName: 'Comm Services' },
+    { symbol: 'VALID_PRE', name: 'Valid Premarket', sectorSymbol: 'XLF', sectorName: 'Financials' },
+  ];
+
+  const wrongDateInp = buildMockInput({ symbol: 'WRONG_DATE', premarketPrice: 228.5 });
+  wrongDateInp.premarket.nyDate = '2026-11-17'; // D-1 instead of sessionBeingPrepared (2026-11-18)
+  wrongDateInp.premarket.sourceWindow = 'premarket_0400_0930';
+
+  const wrongWindowInp = buildMockInput({ symbol: 'WRONG_WINDOW', premarketPrice: 228.5 });
+  wrongWindowInp.premarket.nyDate = '2026-11-18';
+  wrongWindowInp.premarket.sourceWindow = 'regular_or_post'; // Not premarket_0400_0930
+
+  const validInp = buildMockInput({ symbol: 'VALID_PRE', premarketPrice: 228.5 });
+  validInp.premarket.nyDate = '2026-11-18';
+  validInp.premarket.sourceWindow = 'premarket_0400_0930';
+
+  const res = buildShortlist(
+    bench,
+    {
+      WRONG_DATE: wrongDateInp,
+      WRONG_WINDOW: wrongWindowInp,
+      VALID_PRE: validInp,
+    },
+    { excludeNewsBySymbol: {}, usDataRelease0830: false },
+    '2026-11-18'
+  );
+
+  const bySym = Object.fromEntries(res.benchRows.map((r) => [r.symbol, r]));
+
+  assert.equal(bySym.WRONG_DATE.premarketStatus, 'stale');
+  assert.equal(bySym.WRONG_DATE.tests.T1.passed, false);
+  assert.equal(bySym.WRONG_DATE.tests.T1.failLabel, 'No data: pre-market');
+  assert.equal(bySym.WRONG_DATE.selectedInShortlist, false);
+
+  assert.equal(bySym.WRONG_WINDOW.premarketStatus, 'stale');
+  assert.equal(bySym.WRONG_WINDOW.tests.T1.passed, false);
+  assert.equal(bySym.WRONG_WINDOW.tests.T1.failLabel, 'No data: pre-market');
+  assert.equal(bySym.WRONG_WINDOW.selectedInShortlist, false);
+
+  assert.equal(bySym.VALID_PRE.premarketStatus, 'ok');
+  assert.equal(bySym.VALID_PRE.tests.T1.passed, true);
+  assert.equal(bySym.VALID_PRE.selectedInShortlist, true);
+  assert.equal(res.shortlist.length, 1);
+});
+
+test('Bug 3: gradeSilentFlipSession returns "Pending 10:45 NY" before 10:45 NY and "Pending close" for triggered entries before 16:15 NY', () => {
+  // Strong bullish C1 touching RH=228
+  const c1 = make15mBar('09:30:00', 225.5, 228.1, 225.5, 227.9);
+  // Bearish C2 holding RH=228: low=227.02 (Entry=227.02), high=228.00 (Stop=228.02)
+  const c2 = make15mBar('09:45:00', 227.9, 228.0, 227.02, 227.2);
+  // 10:00 bar triggers entry cleanly, and 10:30 bar hits target RL=218.00
+  const triggerBar = make15mBar('10:00:00', 227.2, 227.8, 226.5, 226.6);
+  const targetBar = make15mBar('10:30:00', 222.5, 223.0, 217.8, 218.2);
+
+  // Case 1: Graded at 10:15 NY on 2026-11-18 (15:15 UTC) — before 10:45 NY cut-off
+  const before1045 = gradeSilentFlipSession({
+    date: '2026-11-18',
+    symbol: 'NVDA',
+    sectorSymbol: 'XLK',
+    sector: 'Technology',
+    shortlistSource: 'locked',
+    inShortlist: true,
+    shortlistRank: 1,
+    shortlistScore: 84.0,
+    levels: BASE_GRADER_LEVELS,
+    sessionBars15m: [c1, c2, triggerBar],
+    gradedAt: new Date('2026-11-18T15:15:00Z'), // 10:15:00 America/New_York
+  });
+  assert.equal(before1045.stageReached, 'C1');
+  assert.equal(before1045.failLabel, 'Pending 10:45 NY');
+  assert.equal(before1045.mechanicalResultR, null);
+
+  // Case 2: Graded at 12:30 NY on 2026-11-18 (17:30 UTC) — between 10:45 NY and 16:15 NY
+  // Must grade up to Trigger step and label any triggered entry "Pending close" (never grading Outcome step before 16:15 NY)
+  const before1615Triggered = gradeSilentFlipSession({
+    date: '2026-11-18',
+    symbol: 'NVDA',
+    sectorSymbol: 'XLK',
+    sector: 'Technology',
+    shortlistSource: 'locked',
+    inShortlist: true,
+    shortlistRank: 1,
+    shortlistScore: 84.0,
+    levels: BASE_GRADER_LEVELS,
+    sessionBars15m: [c1, c2, triggerBar, targetBar],
+    gradedAt: new Date('2026-11-18T17:30:00Z'), // 12:30:00 America/New_York
+  });
+  assert.equal(before1615Triggered.stageReached, 'Trigger');
+  assert.equal(before1615Triggered.failLabel, 'Pending close');
+  assert.equal(before1615Triggered.entry, 227.02);
+  assert.equal(before1615Triggered.stop, 228.02);
+  assert.equal(before1615Triggered.target, 218.0);
+  assert.equal(before1615Triggered.mechanicalResultR, null);
+  assert.equal(before1615Triggered.mfeR, null);
+
+  // Case 3: Graded at 16:15 NY on 2026-11-18 (21:15 UTC) — Outcome step is now graded
+  const at1615 = gradeSilentFlipSession({
+    date: '2026-11-18',
+    symbol: 'NVDA',
+    sectorSymbol: 'XLK',
+    sector: 'Technology',
+    shortlistSource: 'locked',
+    inShortlist: true,
+    shortlistRank: 1,
+    shortlistScore: 84.0,
+    levels: BASE_GRADER_LEVELS,
+    sessionBars15m: [c1, c2, triggerBar, targetBar],
+    gradedAt: new Date('2026-11-18T21:15:00Z'), // 16:15:00 America/New_York
+  });
+  assert.equal(at1615.stageReached, 'Outcome');
+  assert.equal(at1615.failLabel, 'Target hit');
+  assert.equal(at1615.mechanicalResultR, 9.02);
+});
+
+test('Bug 4: shortlistSource === "none" forces inShortlist=false, rank=null, score=null, and summary strip counts only locked shortlist entries', () => {
+  const c1 = make15mBar('09:30:00', 225.5, 228.1, 225.5, 227.9);
+  const c2 = make15mBar('09:45:00', 227.9, 228.0, 227.02, 227.2);
+  const triggerBar = make15mBar('10:00:00', 227.2, 227.8, 226.5, 226.6);
+  const targetBar = make15mBar('10:30:00', 222.5, 223.0, 217.8, 218.2);
+
+  // Even if caller passes inShortlist=true, rank=1, score=90, shortlistSource='none' must zero them out
+  const unlockedEntry = gradeSilentFlipSession({
+    date: '2026-11-18',
+    symbol: 'NVDA',
+    sectorSymbol: 'XLK',
+    sector: 'Technology',
+    shortlistSource: 'none',
+    inShortlist: true,
+    shortlistRank: 1,
+    shortlistScore: 90.0,
+    levels: BASE_GRADER_LEVELS,
+    sessionBars15m: [c1, c2, triggerBar, targetBar],
+    gradedAt: new Date('2026-11-18T21:30:00Z'),
+  });
+
+  assert.equal(unlockedEntry.shortlistSource, 'none');
+  assert.equal(unlockedEntry.inShortlist, false);
+  assert.equal(unlockedEntry.shortlistRank, null);
+  assert.equal(unlockedEntry.shortlistScore, null);
+
+  const summary = summarizeSetupLog([unlockedEntry]);
+  assert.equal(summary.shortlisted.entriesCount, 0);
+  assert.equal(summary.notShortlisted.entriesCount, 1);
+});
+
 

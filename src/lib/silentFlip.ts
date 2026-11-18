@@ -668,11 +668,39 @@ export function buildShortlist(
     const symbol = benchItem.symbol;
     const inp = inputsBySymbol[symbol];
 
-    const dailyStatus: DataStatus = inp?.daily?.dataStatus ?? 'unavailable';
-    const intradayStatus: DataStatus =
+    const rawDailyStatus: DataStatus = inp?.daily?.dataStatus ?? 'unavailable';
+    const dailyStatus: DataStatus =
+      rawDailyStatus === 'unavailable' || !inp?.daily?.asOfSession
+        ? 'unavailable'
+        : asOfCompletedSession && inp.daily.asOfSession < asOfCompletedSession
+        ? 'stale'
+        : rawDailyStatus;
+
+    const rawIntradayStatus: DataStatus =
       inp?.intraday15m?.dataStatus ?? 'unavailable';
-    const premarketStatus: DataStatus =
+    const intradayStatus: DataStatus =
+      rawIntradayStatus === 'unavailable' || !inp?.intraday15m?.asOfSession
+        ? 'unavailable'
+        : asOfCompletedSession &&
+          inp.intraday15m.asOfSession < asOfCompletedSession
+        ? 'stale'
+        : rawIntradayStatus;
+
+    const rawPremarketStatus: DataStatus =
       inp?.premarket?.dataStatus ?? 'unavailable';
+    const hasPremarketPrice =
+      rawPremarketStatus !== 'unavailable' &&
+      typeof inp?.premarket?.price === 'number';
+    const isLiveSessionPremarket =
+      hasPremarketPrice &&
+      inp?.premarket?.nyDate === sessionBeingPrepared &&
+      inp?.premarket?.sourceWindow === 'premarket_0400_0930';
+    const premarketStatus: DataStatus =
+      rawPremarketStatus === 'unavailable' || !hasPremarketPrice
+        ? 'unavailable'
+        : isLiveSessionPremarket && rawPremarketStatus === 'ok'
+        ? 'ok'
+        : 'stale';
 
     const levels = inp?.levels ?? null;
     const health: BenchHealthMetrics =
@@ -680,10 +708,7 @@ export function buildShortlist(
       computeBenchHealth(symbol, [], [], asOfCompletedSession);
 
     const A = levels?.firstCandleAvg ?? health.firstCandleAvgDollar ?? null;
-    const P =
-      premarketStatus === 'ok' && typeof inp?.premarket?.price === 'number'
-        ? inp.premarket.price
-        : null;
+    const P = hasPremarketPrice ? inp!.premarket.price : null;
 
     // Track feed failures for the >20% failure red banner
     if (
@@ -946,8 +971,10 @@ export function buildShortlist(
       levels,
       health,
       premarketPrice: P,
+      premarketDateNY: inp?.premarket?.nyDate ?? null,
       premarketTimeNY: inp?.premarket?.nyTime ?? null,
       premarketSourceWindow: inp?.premarket?.sourceWindow ?? 'none',
+      premarketStatus,
       gapPctFromClose,
       earningsStatusLabel,
       earningsUnavailable,
@@ -1178,6 +1205,7 @@ export interface GradeSilentFlipInput {
   symbol: string;
   sectorSymbol: string;
   sector: string;
+  shortlistSource?: 'locked' | 'none';
   inShortlist: boolean;
   shortlistRank: number | null;
   shortlistScore: number | null;
@@ -1185,6 +1213,7 @@ export interface GradeSilentFlipInput {
   levels: ComputedLevels | null;
   sessionBars15m: Intraday15mBar[];
   rules?: SilentFlipRules;
+  gradedAt?: Date;
   existingManual?: {
     taken: boolean | null;
     actualEntry: number | null;
@@ -1208,9 +1237,9 @@ export interface GradeSilentFlipInput {
  *    Checks bars in order:
  *    - Both exceeds C2 extreme and reaches entry in same bar -> "Ambiguous: check 1-minute"
  *    - Exceeds C2 extreme before reaching entry -> "Invalidated"
- *    - Reaches entry -> "Triggered" (proceeds to Step 4)
+ *    - Reaches entry -> "Triggered" (proceeds to Step 4 if at/after 16:15 NY, else "Pending close")
  *    - No touch by cut-off -> "Expired"
- * 4. Mechanical outcome (triggered only): walks forward through 15-minute bars to 16:00 close:
+ * 4. Mechanical outcome (triggered only, at/after 16:15 NY): walks forward through 15-minute bars to 16:00 close:
  *    - Both stop and target hit in same bar -> "Ambiguous"
  *    - First of stop or target hit -> -1R ("Stop hit") or +[planned R] ("Target hit")
  *    - Neither hit -> exit at 16:00 close ("Close exit"), recorded in R
@@ -1229,6 +1258,19 @@ export function gradeSilentFlipSession(
     notes: '',
   };
 
+  const shortlistSource: 'locked' | 'none' =
+    input.shortlistSource ?? (input.inShortlist ? 'locked' : 'none');
+  const inShortlist =
+    shortlistSource === 'locked' ? Boolean(input.inShortlist) : false;
+  const shortlistRank =
+    shortlistSource === 'locked' && inShortlist
+      ? (input.shortlistRank ?? null)
+      : null;
+  const shortlistScore =
+    shortlistSource === 'locked' && inShortlist
+      ? (input.shortlistScore ?? null)
+      : null;
+
   const lvls = input.levels;
   const A = lvls?.firstCandleAvg ?? null;
 
@@ -1240,10 +1282,11 @@ export function gradeSilentFlipSession(
     symbol: input.symbol,
     sectorSymbol: input.sectorSymbol,
     sector: input.sector,
-    inShortlist: input.inShortlist,
-    shortlistRank: input.shortlistRank,
-    shortlistScore: input.shortlistScore,
-    side: input.shortlistSide ?? null,
+    shortlistSource,
+    inShortlist,
+    shortlistRank,
+    shortlistScore,
+    side: shortlistSource === 'locked' ? (input.shortlistSide ?? null) : null,
     fh: lvls?.flipHigh ?? null,
     rh: lvls?.rangeHigh ?? null,
     rl: lvls?.rangeLow ?? null,
@@ -1266,6 +1309,22 @@ export function gradeSilentFlipSession(
     notes: manual.notes,
     ...overrides,
   });
+
+  const now = input.gradedAt ?? new Date();
+  const { nyDate: nowNyDate, nyTime: nowNyTime } = toNewYorkDateTime(now);
+  const isBeforeTriggerCutoff =
+    nowNyDate < input.date ||
+    (nowNyDate === input.date && nowNyTime < '10:45:00');
+  const isBeforeOutcomeClose =
+    nowNyDate < input.date ||
+    (nowNyDate === input.date && nowNyTime < '16:15:00');
+
+  if (isBeforeTriggerCutoff) {
+    return baseEntry({
+      stageReached: 'C1',
+      failLabel: 'Pending 10:45 NY',
+    });
+  }
 
   const sortedBars = [...input.sessionBars15m].sort((a, b) =>
     a.nyTime.localeCompare(b.nyTime)
@@ -1535,6 +1594,23 @@ export function gradeSilentFlipSession(
     });
   }
 
+  // Never grade the Outcome step of a session before 16:15 New York on that date.
+  // Before then, grade up to the Trigger step and label any triggered entry "Pending close".
+  if (isBeforeOutcomeClose) {
+    return baseEntry({
+      side: candidateSide,
+      stageReached: 'Trigger',
+      touchedLevel,
+      failLabel: 'Pending close',
+      entry,
+      stop,
+      target,
+      plannedR,
+      mechanicalResultR: null,
+      mfeR: null,
+    });
+  }
+
   // ==========================================
   // Step 4: Mechanical outcome (triggered only)
   // Walk forward through 15-minute bars to the 16:00 close
@@ -1741,10 +1817,15 @@ function summarizeGroup(
 
 /**
  * Section 8: Computes the summary strip metrics separately for shortlisted and not-shortlisted symbols.
+ * The "Shortlisted" group counts only entries with shortlistSource === 'locked' (and inShortlist === true).
  */
 export function summarizeSetupLog(entries: SetupLogEntry[]): SetupLogSummary {
-  const shortlisted = entries.filter((e) => e.inShortlist);
-  const notShortlisted = entries.filter((e) => !e.inShortlist);
+  const shortlisted = entries.filter(
+    (e) => e.shortlistSource === 'locked' && e.inShortlist
+  );
+  const notShortlisted = entries.filter(
+    (e) => !(e.shortlistSource === 'locked' && e.inShortlist)
+  );
   return {
     shortlisted: summarizeGroup('Shortlisted', shortlisted),
     notShortlisted: summarizeGroup('Not shortlisted', notShortlisted),
@@ -1757,6 +1838,7 @@ export const SETUP_LOG_CSV_COLUMNS: (keyof SetupLogEntry)[] = [
   'symbol',
   'sectorSymbol',
   'sector',
+  'shortlistSource',
   'inShortlist',
   'shortlistRank',
   'shortlistScore',

@@ -11,7 +11,10 @@ import {
   getDataHealthReport,
   getMostRecentCompletedUSSession,
   nextNYSETradingDay,
+  previousNYSETradingDay,
+  recomputeFeedDataStatus,
   resetFeedHealthCounters,
+  toNewYorkDateTime,
 } from './src/lib/marketData.ts';
 import {
   buildShortlist,
@@ -194,9 +197,23 @@ function loadStore(): PersistentStore {
             }
           : { ...DEFAULT_SILENT_FLIP_RULES };
 
-      const cleanSetupLog: SetupLogEntry[] = Array.isArray(parsed.setupLog)
+      const rawSetupLog: SetupLogEntry[] = Array.isArray(parsed.setupLog)
         ? parsed.setupLog
         : [];
+      const cleanSetupLog: SetupLogEntry[] = rawSetupLog.map((entry) => {
+        const hasLock = Boolean(cleanLocks[entry.date]);
+        const shortlistSource: 'locked' | 'none' = hasLock ? 'locked' : 'none';
+        const inShortlist = hasLock ? Boolean(entry.inShortlist) : false;
+        return {
+          ...entry,
+          shortlistSource,
+          inShortlist,
+          shortlistRank:
+            hasLock && inShortlist ? (entry.shortlistRank ?? null) : null,
+          shortlistScore:
+            hasLock && inShortlist ? (entry.shortlistScore ?? null) : null,
+        };
+      });
 
       if (parsed.liveValidatedVersion !== 3) {
         return {
@@ -258,6 +275,26 @@ const dailyFeedCache = new Map<string, DailyFeedFetchResult>();
 const intraday15mCache = new Map<string, Intraday15mFeedResult>();
 const premarketCache = new Map<string, PreMarketQuoteResult>();
 const earningsCache = new Map<string, EarningsFeedResult>();
+let cachedCompletedSession: string | null = null;
+
+/**
+ * Invalidates dailyFeedCache, intraday15mCache, earningsCache, and instrumentCache
+ * whenever getMostRecentCompletedUSSession() differs from the session they were fetched for.
+ */
+function ensureSessionCachesFresh(now?: Date): string {
+  const currentCompletedSession = getMostRecentCompletedUSSession(now);
+  if (
+    cachedCompletedSession !== null &&
+    cachedCompletedSession !== currentCompletedSession
+  ) {
+    instrumentCache.clear();
+    dailyFeedCache.clear();
+    intraday15mCache.clear();
+    earningsCache.clear();
+  }
+  cachedCompletedSession = currentCompletedSession;
+  return currentCompletedSession;
+}
 
 function ensureDefaultJournal(store: PersistentStore, instruments: MarketInstrument[]) {
   if (store.journal.length > 0) return;
@@ -321,6 +358,7 @@ async function getAllUniverseInstruments(
   forceRecompute = false,
   nowOverride?: Date
 ): Promise<MarketInstrument[]> {
+  const expectedCompletedSession = ensureSessionCachesFresh(nowOverride);
   const allSeeds: InstrumentSeed[] = [...GICS_SECTORS, ...CORE_EQUITIES, ...store.customSeeds];
   const results: MarketInstrument[] = new Array(allSeeds.length);
 
@@ -334,9 +372,29 @@ async function getAllUniverseInstruments(
     await Promise.all(
       slice.map(async (seed, idx) => {
         const targetIndex = start + idx;
-        const cached = !forceRecompute ? instrumentCache.get(seed.symbol) : undefined;
-        if (cached) {
-          results[targetIndex] = cached;
+        const cachedDaily = !forceRecompute
+          ? dailyFeedCache.get(seed.symbol)
+          : undefined;
+        const cachedInst = !forceRecompute
+          ? instrumentCache.get(seed.symbol)
+          : undefined;
+
+        if (
+          cachedInst &&
+          cachedDaily &&
+          cachedDaily.fetchedForCompletedSession === expectedCompletedSession
+        ) {
+          const recomputedStatus = recomputeFeedDataStatus(
+            cachedInst.asOfSession,
+            cachedInst.dataStatus,
+            expectedCompletedSession
+          );
+          const freshInst: MarketInstrument =
+            recomputedStatus !== cachedInst.dataStatus
+              ? { ...cachedInst, dataStatus: recomputedStatus }
+              : cachedInst;
+          instrumentCache.set(seed.symbol, freshInst);
+          results[targetIndex] = freshInst;
           return;
         }
 
@@ -352,10 +410,16 @@ async function getAllUniverseInstruments(
           results[targetIndex] = unavail;
         } else {
           dailyFeedCache.set(seed.symbol, feedRes);
+          const asOfSession =
+            feedRes.asOfSession || feedRes.bars[feedRes.bars.length - 1].date;
+          const recomputedStatus = recomputeFeedDataStatus(
+            asOfSession,
+            feedRes.dataStatus,
+            expectedCompletedSession
+          );
           const inst = buildMarketInstrument(seed, feedRes.bars, {
-            dataStatus: feedRes.dataStatus === 'stale' ? 'stale' : 'ok',
-            asOfSession:
-              feedRes.asOfSession || feedRes.bars[feedRes.bars.length - 1].date,
+            dataStatus: recomputedStatus === 'stale' ? 'stale' : 'ok',
+            asOfSession,
             fetchedAt: feedRes.fetchedAt,
             lastPrice: feedRes.lastPrice,
             exchangeName: feedRes.exchangeName,
@@ -386,7 +450,7 @@ async function evaluateSilentFlipShortlist(
   const forceAll = Boolean(options?.forceAll);
   const refreshPremarket = Boolean(options?.refreshPremarket || forceAll);
   const now = options?.now;
-  const dMinus1Default = getMostRecentCompletedUSSession(now);
+  const dMinus1Default = ensureSessionCachesFresh(now);
   const sessionBeingPrepared = nextNYSETradingDay(dMinus1Default);
 
   const inputsBySymbol: Record<string, SymbolShortlistInput> = {};
@@ -399,23 +463,51 @@ async function evaluateSilentFlipShortlist(
         const sym = item.symbol;
 
         let daily = !forceAll ? dailyFeedCache.get(sym) : undefined;
-        if (!daily || daily.dataStatus === 'unavailable') {
+        if (
+          !daily ||
+          daily.dataStatus === 'unavailable' ||
+          daily.fetchedForCompletedSession !== dMinus1Default
+        ) {
           daily = await fetchDailyBars1Y(sym, { now });
           if (daily.dataStatus !== 'unavailable') {
             dailyFeedCache.set(sym, daily);
           } else {
             dailyFeedCache.delete(sym);
           }
+        } else {
+          daily = {
+            ...daily,
+            dataStatus: recomputeFeedDataStatus(
+              daily.asOfSession,
+              daily.dataStatus,
+              dMinus1Default
+            ),
+          };
+          dailyFeedCache.set(sym, daily);
         }
 
         let intraday15m = !forceAll ? intraday15mCache.get(sym) : undefined;
-        if (!intraday15m || intraday15m.dataStatus === 'unavailable') {
+        if (
+          !intraday15m ||
+          intraday15m.dataStatus === 'unavailable' ||
+          intraday15m.fetchedForCompletedSession !== dMinus1Default
+        ) {
           intraday15m = await fetchIntraday15m60D(sym, { now });
           if (intraday15m.dataStatus !== 'unavailable') {
             intraday15mCache.set(sym, intraday15m);
           } else {
             intraday15mCache.delete(sym);
           }
+        } else {
+          intraday15m = {
+            ...intraday15m,
+            dataStatus: recomputeFeedDataStatus(
+              intraday15m.asOfSession,
+              intraday15m.dataStatus,
+              dMinus1Default
+            ),
+          };
+          intraday15mCache.set(sym, intraday15m);
         }
 
         let premarket = !refreshPremarket ? premarketCache.get(sym) : undefined;
@@ -429,10 +521,15 @@ async function evaluateSilentFlipShortlist(
         }
 
         let earnings = !forceAll ? earningsCache.get(sym) : undefined;
-        if (!earnings) {
+        if (
+          !earnings ||
+          earnings.fetchedForCompletedSession !== dMinus1Default
+        ) {
           const fromDate = daily.asOfSession || dMinus1Default;
           const toDate = sessionBeingPrepared;
-          earnings = await fetchEarningsCalendar(sym, fromDate, toDate);
+          earnings = await fetchEarningsCalendar(sym, fromDate, toDate, {
+            now,
+          });
           earningsCache.set(sym, earnings);
         }
 
@@ -832,18 +929,30 @@ async function startServer() {
   /**
    * Section 8: Grades all bench symbols for a specific US session date (YYYY-MM-DD)
    * using that day's 15-minute bars and levels as of the prior completed session (D-1).
+   * - Always re-fetches 15-minute bars when grading today's or the previous session.
+   * - Never invents a historical shortlist: inShortlist, shortlistRank, and shortlistScore
+   *   come strictly from store.lockedShortlists[targetSessionDate].
    */
   async function gradeBenchForSessionDate(
     targetSessionDate: string,
     options?: {
       forceRefresh15m?: boolean;
-      shortlistResultForDate?: ShortlistBuildResult;
+      now?: Date;
     }
   ): Promise<SetupLogEntry[]> {
     const bench = store.SILENT_FLIP_BENCH;
-    const force15m = Boolean(options?.forceRefresh15m);
+    const now = options?.now ?? new Date();
+    const expectedCompletedSession = ensureSessionCachesFresh(now);
+    const { nyDate: todayNyDate } = toNewYorkDateTime(now);
+    const prevTradingDayFromToday = previousNYSETradingDay(todayNyDate);
 
-    // Ensure daily and 15m caches are populated for all bench symbols
+    // Always re-fetch 15-minute bars when grading today's or the previous session
+    const mustRefetch15m =
+      Boolean(options?.forceRefresh15m) ||
+      targetSessionDate === todayNyDate ||
+      targetSessionDate === expectedCompletedSession ||
+      targetSessionDate === prevTradingDayFromToday;
+
     const batchSize = 8;
     for (let start = 0; start < bench.length; start += batchSize) {
       const slice = bench.slice(start, start + batchSize);
@@ -851,39 +960,76 @@ async function startServer() {
         slice.map(async (item) => {
           const sym = item.symbol;
           let daily = dailyFeedCache.get(sym);
-          if (!daily || daily.dataStatus === 'unavailable') {
-            daily = await fetchDailyBars1Y(sym);
+          if (
+            !daily ||
+            daily.dataStatus === 'unavailable' ||
+            daily.fetchedForCompletedSession !== expectedCompletedSession
+          ) {
+            daily = await fetchDailyBars1Y(sym, { now });
             if (daily.dataStatus !== 'unavailable') {
               dailyFeedCache.set(sym, daily);
+            } else {
+              dailyFeedCache.delete(sym);
             }
+          } else {
+            daily = {
+              ...daily,
+              dataStatus: recomputeFeedDataStatus(
+                daily.asOfSession,
+                daily.dataStatus,
+                expectedCompletedSession
+              ),
+            };
+            dailyFeedCache.set(sym, daily);
           }
 
-          let intraday = !force15m ? intraday15mCache.get(sym) : undefined;
-          if (!intraday || intraday.dataStatus === 'unavailable') {
-            intraday = await fetchIntraday15m60D(sym);
+          let intraday = !mustRefetch15m
+            ? intraday15mCache.get(sym)
+            : undefined;
+          if (
+            !intraday ||
+            intraday.dataStatus === 'unavailable' ||
+            intraday.fetchedForCompletedSession !== expectedCompletedSession
+          ) {
+            intraday = await fetchIntraday15m60D(sym, { now });
             if (intraday.dataStatus !== 'unavailable') {
               intraday15mCache.set(sym, intraday);
+            } else {
+              intraday15mCache.delete(sym);
             }
+          } else {
+            intraday = {
+              ...intraday,
+              dataStatus: recomputeFeedDataStatus(
+                intraday.asOfSession,
+                intraday.dataStatus,
+                expectedCompletedSession
+              ),
+            };
+            intraday15mCache.set(sym, intraday);
           }
         })
       );
     }
 
-    // Determine shortlist membership for targetSessionDate:
-    // 1. If a locked shortlist exists for targetSessionDate, use it.
-    // 2. If options.shortlistResultForDate was passed for targetSessionDate, use it.
-    // 3. Otherwise, build the historical shortlist as of targetSessionDate using D-1 daily bars and the 09:30 open as P.
-    let shortlistForDate: ShortlistBuildResult | null =
-      store.lockedShortlists[targetSessionDate]?.result ??
-      (options?.shortlistResultForDate?.sessionBeingPrepared ===
-      targetSessionDate
-        ? options.shortlistResultForDate
-        : null);
+    // Shortlist membership may ONLY come from a real locked shortlist (store.lockedShortlists)
+    const lockedShortlistForDate: ShortlistBuildResult | null =
+      store.lockedShortlists[targetSessionDate]?.result ?? null;
+    const shortlistSource: 'locked' | 'none' = lockedShortlistForDate
+      ? 'locked'
+      : 'none';
+    const lockedRowBySymbol = new Map(
+      (lockedShortlistForDate?.benchRows ?? []).map((r) => [r.symbol, r])
+    );
 
-    const perSymbolHistoricalInputs: Record<string, SymbolShortlistInput> = {};
+    const existingById = new Map(store.setupLog.map((e) => [e.id, e]));
 
-    for (const item of bench) {
+    const gradedEntries: SetupLogEntry[] = bench.map((item) => {
       const sym = item.symbol;
+      const id = `${targetSessionDate}::${sym}`;
+      const existing = existingById.get(id);
+      const lockedRow = lockedRowBySymbol.get(sym);
+
       const daily = dailyFeedCache.get(sym);
       const intraday = intraday15mCache.get(sym);
 
@@ -906,7 +1052,7 @@ async function startServer() {
         dMinus1Date
       );
 
-      const levels =
+      const computedLevels =
         dMinus1Date && priorDailyBars.length > 0
           ? computeLevels(
               priorDailyBars,
@@ -915,84 +1061,8 @@ async function startServer() {
             )
           : null;
 
-      const targetSession =
-        intraday?.sessions.find((s) => s.sessionDate === targetSessionDate) ??
-        null;
-      const openPrice =
-        targetSession?.firstCandle?.open ??
-        targetSession?.bars?.[0]?.open ??
-        premarketCache.get(sym)?.price ??
-        null;
+      const levels = lockedRow?.levels ?? computedLevels;
 
-      perSymbolHistoricalInputs[sym] = {
-        daily: {
-          symbol: sym,
-          dataStatus:
-            daily?.dataStatus === 'ok' && priorDailyBars.length > 0
-              ? 'ok'
-              : 'unavailable',
-          asOfSession: dMinus1Date,
-          fetchedAt: daily?.fetchedAt || new Date().toISOString(),
-          bars: priorDailyBars,
-          lastPrice: openPrice,
-          exchangeName: daily?.exchangeName,
-          shortName: daily?.shortName,
-        },
-        intraday15m: {
-          symbol: sym,
-          dataStatus:
-            intraday?.dataStatus === 'ok' && priorIntradaySessions.length > 0
-              ? 'ok'
-              : 'unavailable',
-          asOfSession: dMinus1Date,
-          fetchedAt: intraday?.fetchedAt || new Date().toISOString(),
-          sessions: priorIntradaySessions,
-        },
-        premarket: {
-          symbol: sym,
-          dataStatus: openPrice !== null ? 'ok' : 'unavailable',
-          fetchedAt: new Date().toISOString(),
-          nyDate: targetSessionDate,
-          nyTime: '09:15:00',
-          price: openPrice,
-          volume: 0,
-          sourceWindow: 'premarket_0400_0930',
-        },
-        earnings: {
-          symbol: sym,
-          dataStatus: 'unavailable',
-          fetchedAt: new Date().toISOString(),
-          providerConfigured: false,
-          events: [],
-        },
-        levels,
-        health,
-      };
-    }
-
-    if (!shortlistForDate) {
-      shortlistForDate = buildShortlist(
-        bench,
-        perSymbolHistoricalInputs,
-        store.silentFlipOverrides,
-        targetSessionDate
-      );
-    }
-
-    const rowBySymbol = new Map(
-      shortlistForDate.benchRows.map((r) => [r.symbol, r])
-    );
-    const existingById = new Map(store.setupLog.map((e) => [e.id, e]));
-
-    const gradedEntries: SetupLogEntry[] = bench.map((item) => {
-      const sym = item.symbol;
-      const id = `${targetSessionDate}::${sym}`;
-      const existing = existingById.get(id);
-      const shortlistRow = rowBySymbol.get(sym);
-      const histInp = perSymbolHistoricalInputs[sym];
-      const levels = shortlistRow?.levels ?? histInp?.levels ?? null;
-
-      const intraday = intraday15mCache.get(sym);
       const targetSession =
         intraday?.sessions.find((s) => s.sessionDate === targetSessionDate) ??
         null;
@@ -1008,58 +1078,37 @@ async function startServer() {
           }
         : undefined;
 
-      // If no 15m bars exist yet for targetSessionDate (e.g. locked pre-market before 09:30 NY open),
-      // record the locked shortlist state as Pending 10:45 NY
-      if (sessionBars.length === 0) {
-        return {
-          id,
-          date: targetSessionDate,
-          symbol: sym,
-          sectorSymbol: item.sectorSymbol,
-          sector: item.sectorName,
-          inShortlist: Boolean(shortlistRow?.selectedInShortlist),
-          shortlistRank: shortlistRow?.shortlistRank ?? null,
-          shortlistScore: shortlistRow?.score ?? null,
-          side: shortlistRow?.winningSide ?? null,
-          fh: levels?.flipHigh ?? null,
-          rh: levels?.rangeHigh ?? null,
-          rl: levels?.rangeLow ?? null,
-          fl: levels?.flipLow ?? null,
-          firstCandleAvg:
-            levels?.firstCandleAvg !== null &&
-            levels?.firstCandleAvg !== undefined
-              ? Number(levels.firstCandleAvg.toFixed(4))
-              : null,
-          stageReached: 'C1',
-          touchedLevel: null,
-          failLabel: 'Pending 10:45 NY',
-          entry: null,
-          stop: null,
-          target: null,
-          plannedR: null,
-          mechanicalResultR: null,
-          mfeR: null,
-          rulesVersion: store.silentFlipRules.rulesVersion,
-          taken: existingManual?.taken ?? null,
-          actualEntry: existingManual?.actualEntry ?? null,
-          actualExit: existingManual?.actualExit ?? null,
-          actualR: existingManual?.actualR ?? null,
-          notes: existingManual?.notes ?? '',
-        };
-      }
+      const inShortlist =
+        shortlistSource === 'locked'
+          ? Boolean(lockedRow?.selectedInShortlist)
+          : false;
+      const shortlistRank =
+        shortlistSource === 'locked' && inShortlist
+          ? (lockedRow?.shortlistRank ?? null)
+          : null;
+      const shortlistScore =
+        shortlistSource === 'locked' && inShortlist
+          ? (lockedRow?.score ?? null)
+          : null;
+      const shortlistSide =
+        shortlistSource === 'locked'
+          ? (lockedRow?.winningSide ?? null)
+          : null;
 
       return gradeSilentFlipSession({
         date: targetSessionDate,
         symbol: sym,
         sectorSymbol: item.sectorSymbol,
         sector: item.sectorName,
-        inShortlist: Boolean(shortlistRow?.selectedInShortlist),
-        shortlistRank: shortlistRow?.shortlistRank ?? null,
-        shortlistScore: shortlistRow?.score ?? null,
-        shortlistSide: shortlistRow?.winningSide ?? null,
+        shortlistSource,
+        inShortlist,
+        shortlistRank,
+        shortlistScore,
+        shortlistSide,
         levels,
         sessionBars15m: sessionBars,
         rules: store.silentFlipRules,
+        gradedAt: now,
         existingManual,
       });
     });
@@ -1076,6 +1125,7 @@ async function startServer() {
 
     if (action === 'unlock') {
       delete store.lockedShortlists[sessionDate];
+      await gradeBenchForSessionDate(sessionDate);
       saveStore(store);
       res.json({ ...payload, lockedRecord: null });
       return;
@@ -1093,9 +1143,7 @@ async function startServer() {
     store.lockedShortlists[sessionDate] = lockedRecord;
 
     // Section 6 & 8: Locking freezes the selection and writes it to the setup log
-    await gradeBenchForSessionDate(sessionDate, {
-      shortlistResultForDate: payload.result,
-    });
+    await gradeBenchForSessionDate(sessionDate, { now });
 
     saveStore(store);
     res.json({ ...payload, lockedRecord });

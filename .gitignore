@@ -6,3 +6,4 @@ coverage/
 *.log
 .env*
 !.env.example
+.volflow-store.json

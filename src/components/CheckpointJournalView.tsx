@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { BookOpen, Calendar, Plus, Trash2 } from 'lucide-react';
+import { BookOpen, Calendar, ClipboardList, Plus, Trash2 } from 'lucide-react';
 import {
   BaselinePeriod,
   CheckpointSnapshot,
   MarketInstrument,
   TimeframeWindow,
 } from '../types/market';
+import { DataStatusChip } from './DataStatusChip';
+import { SilentFlipLogPanel } from './SilentFlipLogPanel';
 
 interface CheckpointJournalViewProps {
   journal: CheckpointSnapshot[];
@@ -25,6 +27,7 @@ export const CheckpointJournalView: React.FC<CheckpointJournalViewProps> = ({
   onDeleteSnapshot,
   onSelectInstrument,
 }) => {
+  const [subTab, setSubTab] = useState<'notes' | 'silent_flip_log'>('notes');
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string>(
     journal[0]?.id || ''
   );
@@ -38,24 +41,66 @@ export const CheckpointJournalView: React.FC<CheckpointJournalViewProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
-        <div>
-          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            Daily &amp; Weekly Trade Notes (Did the Volume Hold Up?)
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Save a quick snapshot of today's top sectors and your #1 trade idea. Come back tomorrow or next week to see if the buying volume kept going.
-          </p>
+      {/* Sub-tab switcher: Daily Trade Notes vs Silent Flip log */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3">
+        <div className="inline-flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-950 rounded-lg">
+          <button
+            onClick={() => setSubTab('notes')}
+            className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors inline-flex items-center gap-1.5 ${
+              subTab === 'notes'
+                ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Volume Trade Notes ({journal.length})</span>
+          </button>
+          <button
+            onClick={() => setSubTab('silent_flip_log')}
+            className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors inline-flex items-center gap-1.5 ${
+              subTab === 'silent_flip_log'
+                ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            <span>Silent Flip log</span>
+          </button>
         </div>
 
-        <button
-          onClick={onOpenLogModal}
-          className="px-4 py-2 text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white rounded-md transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Save Today's Note</span>
-        </button>
+        {subTab === 'notes' && (
+          <button
+            onClick={onOpenLogModal}
+            className="px-4 py-1.5 text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white rounded-md transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Save Today&apos;s Note</span>
+          </button>
+        )}
       </div>
+
+      {subTab === 'silent_flip_log' ? (
+        <SilentFlipLogPanel />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                Daily &amp; Weekly Trade Notes (Did the Volume Hold Up?)
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Save a quick snapshot of today&apos;s top sectors and your #1 trade idea. Come back tomorrow or next week to see if the buying volume kept going.
+              </p>
+            </div>
+
+            <button
+              onClick={onOpenLogModal}
+              className="px-4 py-2 text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white rounded-md transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Save Today&apos;s Note</span>
+            </button>
+          </div>
 
       {journal.length === 0 ? (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-12 text-center space-y-3">
@@ -173,9 +218,12 @@ export const CheckpointJournalView: React.FC<CheckpointJournalViewProps> = ({
                     <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800/60">
                       {activeSnapshot.topSectors.map((sec) => {
                         const liveInst = instMap.get(sec.symbol);
-                        const liveM = liveInst?.metricsByBaseline[baseline];
-                        const liveRvol5D = liveM ? liveM.rvol5D : sec.rvol5D;
-                        const rvolDelta = liveRvol5D - sec.rvol5D;
+                        const liveM = liveInst?.metricsByBaseline?.[baseline] ?? null;
+                        const isUnavail =
+                          !liveInst || liveInst.dataStatus === 'unavailable' || !liveM;
+                        const liveRvol5D = liveM ? liveM.rvol5D : null;
+                        const rvolDelta =
+                          liveRvol5D !== null ? liveRvol5D - sec.rvol5D : null;
 
                         return (
                           <tr
@@ -184,34 +232,45 @@ export const CheckpointJournalView: React.FC<CheckpointJournalViewProps> = ({
                             className="h-9 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer"
                           >
                             <td className="py-2 pr-3 font-semibold text-slate-900 dark:text-slate-100">
-                              {sec.name} ({sec.symbol})
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span>
+                                  {sec.name} ({sec.symbol})
+                                </span>
+                                {liveInst && <DataStatusChip instrument={liveInst} />}
+                              </div>
                             </td>
                             <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                              {sec.rvol5D.toFixed(2)}x Normal
+                              {isUnavail ? '—' : `${sec.rvol5D.toFixed(2)}x Normal`}
                             </td>
                             <td className="py-2 px-3 text-right font-mono tabular-nums font-semibold">
-                              <span
-                                className={
-                                  liveRvol5D >= 1.35
-                                    ? 'text-emerald-600 dark:text-emerald-400'
-                                    : 'text-slate-900 dark:text-slate-100'
-                                }
-                              >
-                                {liveRvol5D.toFixed(2)}x Normal
-                              </span>
-                              <span
-                                className={`ml-1.5 text-[11px] ${
-                                  rvolDelta >= 0
-                                    ? 'text-emerald-600 dark:text-emerald-400'
-                                    : 'text-rose-600 dark:text-rose-400'
-                                }`}
-                              >
-                                ({rvolDelta >= 0 ? '+' : ''}
-                                {rvolDelta.toFixed(2)}x)
-                              </span>
+                              {!isUnavail && liveRvol5D !== null && rvolDelta !== null ? (
+                                <>
+                                  <span
+                                    className={
+                                      liveRvol5D >= 1.35
+                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                        : 'text-slate-900 dark:text-slate-100'
+                                    }
+                                  >
+                                    {liveRvol5D.toFixed(2)}x Normal
+                                  </span>
+                                  <span
+                                    className={`ml-1.5 text-[11px] ${
+                                      rvolDelta >= 0
+                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                        : 'text-rose-600 dark:text-rose-400'
+                                    }`}
+                                  >
+                                    ({rvolDelta >= 0 ? '+' : ''}
+                                    {rvolDelta.toFixed(2)}x)
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-rose-500">No data</span>
+                              )}
                             </td>
                             <td className="py-2 pl-3 font-mono text-slate-700 dark:text-slate-300">
-                              {liveM ? liveM.directionalSummary : sec.regime}
+                              {!isUnavail && liveM ? liveM.directionalSummary : 'No data'}
                             </td>
                           </tr>
                         );
@@ -240,10 +299,17 @@ export const CheckpointJournalView: React.FC<CheckpointJournalViewProps> = ({
                     <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800/60">
                       {activeSnapshot.topStocks.map((st) => {
                         const liveInst = instMap.get(st.symbol);
-                        const liveM = liveInst?.metricsByBaseline[baseline];
-                        const livePrice = liveInst ? liveInst.price : st.price;
+                        const liveM = liveInst?.metricsByBaseline?.[baseline] ?? null;
+                        const livePrice = liveInst?.price ?? null;
+                        const isUnavail =
+                          !liveInst ||
+                          liveInst.dataStatus === 'unavailable' ||
+                          !liveM ||
+                          livePrice === null;
                         const pctDiff =
-                          ((livePrice - st.price) / Math.max(0.01, st.price)) * 100;
+                          livePrice !== null
+                            ? ((livePrice - st.price) / Math.max(0.01, st.price)) * 100
+                            : null;
 
                         return (
                           <tr
@@ -252,34 +318,47 @@ export const CheckpointJournalView: React.FC<CheckpointJournalViewProps> = ({
                             className="h-9 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer"
                           >
                             <td className="py-2 pr-3 font-mono font-semibold text-slate-900 dark:text-slate-100">
-                              {st.symbol} ·{' '}
-                              <span className="font-sans font-normal text-slate-500 dark:text-slate-400">
-                                {st.name}
-                              </span>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span>
+                                  {st.symbol} ·{' '}
+                                  <span className="font-sans font-normal text-slate-500 dark:text-slate-400">
+                                    {st.name}
+                                  </span>
+                                </span>
+                                {liveInst && <DataStatusChip instrument={liveInst} />}
+                              </div>
                             </td>
                             <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                              ${st.price.toFixed(2)}
+                              {isUnavail ? '—' : `$${st.price.toFixed(2)}`}
                             </td>
                             <td className="py-2 px-3 text-right font-mono tabular-nums font-medium">
-                              <span className="text-slate-900 dark:text-slate-100">
-                                ${livePrice.toFixed(2)}
-                              </span>
-                              <span
-                                className={`ml-1.5 text-[11px] ${
-                                  pctDiff >= 0
-                                    ? 'text-emerald-600 dark:text-emerald-400'
-                                    : 'text-rose-600 dark:text-rose-400'
-                                }`}
-                              >
-                                ({pctDiff >= 0 ? '+' : ''}
-                                {pctDiff.toFixed(1)}%)
-                              </span>
+                              {!isUnavail && livePrice !== null && pctDiff !== null ? (
+                                <>
+                                  <span className="text-slate-900 dark:text-slate-100">
+                                    ${livePrice.toFixed(2)}
+                                  </span>
+                                  <span
+                                    className={`ml-1.5 text-[11px] ${
+                                      pctDiff >= 0
+                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                        : 'text-rose-600 dark:text-rose-400'
+                                    }`}
+                                  >
+                                    ({pctDiff >= 0 ? '+' : ''}
+                                    {pctDiff.toFixed(1)}%)
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-rose-500">No data</span>
+                              )}
                             </td>
                             <td className="py-2 px-3 text-right font-mono tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
-                              {(liveM ? liveM.rvol5D : st.rvol5D).toFixed(2)}x Normal
+                              {!isUnavail && liveM
+                                ? `${liveM.rvol5D.toFixed(2)}x Normal`
+                                : 'No data'}
                             </td>
                             <td className="py-2 pl-3 font-mono text-slate-700 dark:text-slate-300">
-                              {liveM ? liveM.directionalSummary : st.regime}
+                              {!isUnavail && liveM ? liveM.directionalSummary : 'No data'}
                             </td>
                           </tr>
                         );
@@ -291,6 +370,8 @@ export const CheckpointJournalView: React.FC<CheckpointJournalViewProps> = ({
             </div>
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );

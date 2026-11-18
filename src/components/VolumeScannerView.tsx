@@ -10,6 +10,7 @@ import {
   MarketInstrument,
   TimeframeWindow,
 } from '../types/market';
+import { DataStatusChip } from './DataStatusChip';
 
 interface VolumeScannerViewProps {
   instruments: MarketInstrument[];
@@ -68,13 +69,24 @@ export const VolumeScannerView: React.FC<VolumeScannerViewProps> = ({
     const q = searchQuery.trim().toLowerCase();
 
     const filtered = instruments.filter((inst) => {
-      if (inst.isSectorETF) return false; // Focus on tradeable stocks in Stock Finder
+      if (inst.isSectorETF) return false;
 
       if (sectorFilter !== 'ALL' && inst.sectorSymbol !== sectorFilter) {
         return false;
       }
 
-      const m = inst.metricsByBaseline[baseline];
+      if (q) {
+        const matchSym = inst.symbol.toLowerCase().includes(q);
+        const matchName = inst.name.toLowerCase().includes(q);
+        const matchSec = inst.sectorName.toLowerCase().includes(q);
+        if (!matchSym && !matchName && !matchSec) return false;
+      }
+
+      const m = inst.metricsByBaseline?.[baseline] ?? null;
+      if (inst.dataStatus === 'unavailable' || !m) {
+        return preset === 'ALL' && minRvol <= 0;
+      }
+
       const activeRvol = getRvolForTimeframe(m, timeframe);
       if (activeRvol < minRvol) return false;
 
@@ -94,19 +106,17 @@ export const VolumeScannerView: React.FC<VolumeScannerViewProps> = ({
         return false;
       }
 
-      if (q) {
-        const matchSym = inst.symbol.toLowerCase().includes(q);
-        const matchName = inst.name.toLowerCase().includes(q);
-        const matchSec = inst.sectorName.toLowerCase().includes(q);
-        if (!matchSym && !matchName && !matchSec) return false;
-      }
-
       return true;
     });
 
     return filtered.sort((a, b) => {
-      const rvolA = getRvolForTimeframe(a.metricsByBaseline[baseline], timeframe);
-      const rvolB = getRvolForTimeframe(b.metricsByBaseline[baseline], timeframe);
+      const mA = a.metricsByBaseline?.[baseline];
+      const mB = b.metricsByBaseline?.[baseline];
+      if (!mA && !mB) return a.symbol.localeCompare(b.symbol);
+      if (!mA) return 1;
+      if (!mB) return -1;
+      const rvolA = getRvolForTimeframe(mA, timeframe);
+      const rvolB = getRvolForTimeframe(mB, timeframe);
       return rvolB - rvolA;
     });
   }, [instruments, preset, sectorFilter, minRvol, searchQuery, baseline, timeframe]);
@@ -212,16 +222,18 @@ export const VolumeScannerView: React.FC<VolumeScannerViewProps> = ({
         ) : (
           <div className="divide-y divide-slate-200/70 dark:divide-slate-800/70">
             {filteredAndSorted.map((inst) => {
-              const m = inst.metricsByBaseline[baseline];
-              const activeRvol = getRvolForTimeframe(m, timeframe);
+              const m = inst.metricsByBaseline?.[baseline] ?? null;
+              const isUnavailable = inst.dataStatus === 'unavailable' || !m || inst.price === null;
+              const activeRvol = m ? getRvolForTimeframe(m, timeframe) : null;
               const chg = getPriceChangeForTimeframe(inst, timeframe);
               const isSelected = inst.symbol === selectedInstrumentSymbol;
               const isPicked = inst.symbol === selectedTradeSymbol;
               const isBullish =
-                m.directionBias === 'UPSIDE_BREAKOUT' ||
-                m.directionBias === 'UPSIDE_ACCUMULATION' ||
-                m.directionBias === 'BULLISH_LOW_VOL_PULLBACK';
-              const isBearish = m.directionBias === 'DOWNSIDE_DISTRIBUTION';
+                m &&
+                (m.directionBias === 'UPSIDE_BREAKOUT' ||
+                  m.directionBias === 'UPSIDE_ACCUMULATION' ||
+                  m.directionBias === 'BULLISH_LOW_VOL_PULLBACK');
+              const isBearish = m?.directionBias === 'DOWNSIDE_DISTRIBUTION';
 
               return (
                 <div
@@ -234,7 +246,7 @@ export const VolumeScannerView: React.FC<VolumeScannerViewProps> = ({
                   }`}
                 >
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-sm font-bold text-slate-900 dark:text-slate-100">
                         {inst.symbol}
                       </span>
@@ -244,80 +256,91 @@ export const VolumeScannerView: React.FC<VolumeScannerViewProps> = ({
                       <span className="text-xs text-slate-400">
                         · {inst.sectorName}
                       </span>
+                      <DataStatusChip instrument={inst} />
                     </div>
-                    <div className="mt-0.5 text-xs">
-                      <span
-                        className={`font-mono font-semibold ${
-                          isBullish
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : isBearish
-                            ? 'text-rose-600 dark:text-rose-400'
-                            : 'text-amber-600 dark:text-amber-400'
-                        }`}
-                      >
-                        {m.directionalSummary}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4 font-mono text-xs tabular-nums">
-                    <div className="text-right">
-                      <div className="text-[10px] font-sans text-slate-400">
-                        Steady
-                      </div>
-                      <div>{m.daysAboveBaseline20D}/20d</div>
-                    </div>
-
-                    <div className="text-right min-w-[80px]">
-                      <div
-                        className={`font-bold ${
-                          activeRvol >= 1.3
-                            ? isBearish
+                    {!isUnavailable && m && (
+                      <div className="mt-0.5 text-xs">
+                        <span
+                          className={`font-mono font-semibold ${
+                            isBullish
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : isBearish
                               ? 'text-rose-600 dark:text-rose-400'
-                              : 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-slate-900 dark:text-slate-100'
-                        }`}
-                      >
-                        {activeRvol.toFixed(2)}x Vol
+                              : 'text-amber-600 dark:text-amber-400'
+                          }`}
+                        >
+                          {m.directionalSummary}
+                        </span>
                       </div>
-                      <div
-                        className={
-                          chg >= 0
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-rose-600 dark:text-rose-400'
-                        }
-                      >
-                        ${inst.price.toFixed(2)} ({chg >= 0 ? '+' : ''}
-                        {chg.toFixed(1)}%)
-                      </div>
-                    </div>
-
-                    {onPickAsDailyTrade && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onPickAsDailyTrade(inst.symbol);
-                        }}
-                        className={`px-2.5 py-1.5 text-xs font-sans font-medium rounded transition-colors inline-flex items-center gap-1 whitespace-nowrap shrink-0 ${
-                          isPicked
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-slate-100 dark:bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        {isPicked ? (
-                          <>
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>#1 Pick</span>
-                          </>
-                        ) : (
-                          <>
-                            <Target className="w-3 h-3" />
-                            <span>Pick #1</span>
-                          </>
-                        )}
-                      </button>
                     )}
                   </div>
+
+                  {!isUnavailable && m && activeRvol !== null && inst.price !== null ? (
+                    <div className="flex items-center gap-4 font-mono text-xs tabular-nums">
+                      <div className="text-right">
+                        <div className="text-[10px] font-sans text-slate-400">
+                          Steady
+                        </div>
+                        <div>{m.daysAboveBaseline20D}/20d</div>
+                      </div>
+
+                      <div className="text-right min-w-[80px]">
+                        <div
+                          className={`font-bold ${
+                            activeRvol >= 1.3
+                              ? isBearish
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-slate-900 dark:text-slate-100'
+                          }`}
+                        >
+                          {activeRvol.toFixed(2)}x Vol
+                        </div>
+                        <div
+                          className={
+                            (chg ?? 0) >= 0
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-rose-600 dark:text-rose-400'
+                          }
+                        >
+                          ${inst.price.toFixed(2)}
+                          {chg !== null
+                            ? ` (${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%)`
+                            : ''}
+                        </div>
+                      </div>
+
+                      {onPickAsDailyTrade && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onPickAsDailyTrade(inst.symbol);
+                          }}
+                          className={`px-2.5 py-1.5 text-xs font-sans font-medium rounded transition-colors inline-flex items-center gap-1 whitespace-nowrap shrink-0 ${
+                            isPicked
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {isPicked ? (
+                            <>
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>#1 Pick</span>
+                            </>
+                          ) : (
+                            <>
+                              <Target className="w-3 h-3" />
+                              <span>Pick #1</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="font-mono text-xs text-rose-500">
+                      Market data unavailable
+                    </div>
+                  )}
                 </div>
               );
             })}

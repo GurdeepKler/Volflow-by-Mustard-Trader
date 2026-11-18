@@ -1,6 +1,7 @@
 import {
   BaselinePeriod,
   DailyBar,
+  DataStatus,
   MarketInstrument,
   MultiTimeframeMetrics,
   PriceVolumeRegime,
@@ -15,6 +16,7 @@ export interface RawOHLCV {
   low: number;
   close: number;
   volume: number;
+  isHalfDay?: boolean;
 }
 
 export interface InstrumentSeed {
@@ -24,17 +26,6 @@ export interface InstrumentSeed {
   sectorSymbol: string;
   sectorName: string;
   industry: string;
-  basePrice: number;
-  baseDailyVolume: number;
-  volumeProfile:
-    | 'surging_breakout'
-    | 'stealth_accumulation'
-    | 'sustained_inflow'
-    | 'distribution_outflow'
-    | 'high_vol_churn'
-    | 'quiet_pullback'
-    | 'dry_consolidation'
-    | 'normal_rotation';
 }
 
 export const GICS_SECTORS: InstrumentSeed[] = [
@@ -45,9 +36,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLK',
     sectorName: 'Technology',
     industry: 'Market Sector ETF',
-    basePrice: 170.28,
-    baseDailyVolume: 8_700_000,
-    volumeProfile: 'surging_breakout',
   },
   {
     symbol: 'XLE',
@@ -56,9 +44,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLE',
     sectorName: 'Energy',
     industry: 'Market Sector ETF',
-    basePrice: 64.96,
-    baseDailyVolume: 18_500_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'XLF',
@@ -67,9 +52,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLF',
     sectorName: 'Financials',
     industry: 'Market Sector ETF',
-    basePrice: 58.68,
-    baseDailyVolume: 30_000_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'XLI',
@@ -78,9 +60,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLI',
     sectorName: 'Industrials',
     industry: 'Market Sector ETF',
-    basePrice: 168.78,
-    baseDailyVolume: 6_800_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'XLC',
@@ -89,9 +68,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLC',
     sectorName: 'Comm Services',
     industry: 'Market Sector ETF',
-    basePrice: 108.69,
-    baseDailyVolume: 6_100_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'XLV',
@@ -100,9 +76,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLV',
     sectorName: 'Health Care',
     industry: 'Market Sector ETF',
-    basePrice: 188.85,
-    baseDailyVolume: 5_800_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'XLY',
@@ -111,9 +84,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLY',
     sectorName: 'Cons Discretionary',
     industry: 'Market Sector ETF',
-    basePrice: 119.98,
-    baseDailyVolume: 6_200_000,
-    volumeProfile: 'normal_rotation',
   },
   {
     symbol: 'XLU',
@@ -122,9 +92,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLU',
     sectorName: 'Utilities',
     industry: 'Market Sector ETF',
-    basePrice: 44.04,
-    baseDailyVolume: 14_200_000,
-    volumeProfile: 'stealth_accumulation',
   },
   {
     symbol: 'XLB',
@@ -133,9 +100,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLB',
     sectorName: 'Materials',
     industry: 'Market Sector ETF',
-    basePrice: 52.23,
-    baseDailyVolume: 7_200_000,
-    volumeProfile: 'normal_rotation',
   },
   {
     symbol: 'XLP',
@@ -144,9 +108,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLP',
     sectorName: 'Cons Staples',
     industry: 'Market Sector ETF',
-    basePrice: 92.35,
-    baseDailyVolume: 18_300_000,
-    volumeProfile: 'surging_breakout',
   },
   {
     symbol: 'XLRE',
@@ -155,9 +116,6 @@ export const GICS_SECTORS: InstrumentSeed[] = [
     sectorSymbol: 'XLRE',
     sectorName: 'Real Estate',
     industry: 'Market Sector ETF',
-    basePrice: 44.37,
-    baseDailyVolume: 4_500_000,
-    volumeProfile: 'stealth_accumulation',
   },
 ];
 
@@ -170,9 +128,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLK',
     sectorName: 'Technology',
     industry: 'Semiconductors',
-    basePrice: 162.85,
-    baseDailyVolume: 138_000_000,
-    volumeProfile: 'distribution_outflow',
   },
   {
     symbol: 'AVGO',
@@ -181,9 +136,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLK',
     sectorName: 'Technology',
     industry: 'Semiconductors',
-    basePrice: 347.01,
-    baseDailyVolume: 23_500_000,
-    volumeProfile: 'surging_breakout',
   },
   {
     symbol: 'AMD',
@@ -192,9 +144,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLK',
     sectorName: 'Technology',
     industry: 'Semiconductors',
-    basePrice: 534.06,
-    baseDailyVolume: 28_000_000,
-    volumeProfile: 'surging_breakout',
   },
   {
     symbol: 'ANET',
@@ -203,9 +152,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLK',
     sectorName: 'Technology',
     industry: 'Cloud Networking',
-    basePrice: 197.29,
-    baseDailyVolume: 8_200_000,
-    volumeProfile: 'surging_breakout',
   },
   {
     symbol: 'PLTR',
@@ -214,9 +160,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLK',
     sectorName: 'Technology',
     industry: 'Enterprise AI Software',
-    basePrice: 167.99,
-    baseDailyVolume: 30_500_000,
-    volumeProfile: 'quiet_pullback',
   },
   {
     symbol: 'MSFT',
@@ -225,9 +168,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLK',
     sectorName: 'Technology',
     industry: 'Cloud & Software',
-    basePrice: 523.88,
-    baseDailyVolume: 26_000_000,
-    volumeProfile: 'normal_rotation',
   },
   {
     symbol: 'AAPL',
@@ -236,9 +176,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLK',
     sectorName: 'Technology',
     industry: 'Consumer Tech',
-    basePrice: 356.27,
-    baseDailyVolume: 40_000_000,
-    volumeProfile: 'sustained_inflow',
   },
 
   // Energy (XLE)
@@ -249,9 +186,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLE',
     sectorName: 'Energy',
     industry: 'Oil & Gas Exploration',
-    basePrice: 58.75,
-    baseDailyVolume: 11_200_000,
-    volumeProfile: 'surging_breakout',
   },
   {
     symbol: 'EOG',
@@ -260,9 +194,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLE',
     sectorName: 'Energy',
     industry: 'Crude Oil & Nat Gas',
-    basePrice: 158.32,
-    baseDailyVolume: 4_600_000,
-    volumeProfile: 'surging_breakout',
   },
   {
     symbol: 'XOM',
@@ -271,9 +202,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLE',
     sectorName: 'Energy',
     industry: 'Integrated Oil & Gas',
-    basePrice: 170.59,
-    baseDailyVolume: 11_500_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'TRGP',
@@ -282,9 +210,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLE',
     sectorName: 'Energy',
     industry: 'Natural Gas & LNG',
-    basePrice: 297.33,
-    baseDailyVolume: 1_200_000,
-    volumeProfile: 'sustained_inflow',
   },
 
   // Financials (XLF)
@@ -295,9 +220,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLF',
     sectorName: 'Financials',
     industry: 'Major Banks',
-    basePrice: 346.19,
-    baseDailyVolume: 7_200_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'GS',
@@ -306,9 +228,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLF',
     sectorName: 'Financials',
     industry: 'Investment Banking',
-    basePrice: 916.56,
-    baseDailyVolume: 1_900_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'KKR',
@@ -317,9 +236,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLF',
     sectorName: 'Financials',
     industry: 'Asset Management',
-    basePrice: 98.05,
-    baseDailyVolume: 4_500_000,
-    volumeProfile: 'stealth_accumulation',
   },
 
   // Industrials (XLI)
@@ -330,9 +246,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLI',
     sectorName: 'Industrials',
     industry: 'Public Safety Tech',
-    basePrice: 315.43,
-    baseDailyVolume: 1_800_000,
-    volumeProfile: 'stealth_accumulation',
   },
   {
     symbol: 'GEV',
@@ -341,9 +254,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLI',
     sectorName: 'Industrials',
     industry: 'Power Grid Equipment',
-    basePrice: 803.13,
-    baseDailyVolume: 2_800_000,
-    volumeProfile: 'surging_breakout',
   },
   {
     symbol: 'CAT',
@@ -352,9 +262,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLI',
     sectorName: 'Industrials',
     industry: 'Heavy Machinery',
-    basePrice: 600.20,
-    baseDailyVolume: 2_300_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'ETN',
@@ -363,9 +270,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLI',
     sectorName: 'Industrials',
     industry: 'Electrical Grid Systems',
-    basePrice: 352.97,
-    baseDailyVolume: 2_400_000,
-    volumeProfile: 'sustained_inflow',
   },
 
   // Communication Services (XLC)
@@ -376,9 +280,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLC',
     sectorName: 'Comm Services',
     industry: 'AdTech Platform',
-    basePrice: 15.68,
-    baseDailyVolume: 14_000_000,
-    volumeProfile: 'surging_breakout',
   },
   {
     symbol: 'META',
@@ -387,9 +288,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLC',
     sectorName: 'Comm Services',
     industry: 'Social & Digital Ads',
-    basePrice: 641.69,
-    baseDailyVolume: 15_100_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'GOOGL',
@@ -398,9 +296,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLC',
     sectorName: 'Comm Services',
     industry: 'Search & Cloud',
-    basePrice: 295.77,
-    baseDailyVolume: 30_000_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'NFLX',
@@ -409,9 +304,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLC',
     sectorName: 'Comm Services',
     industry: 'Streaming Media',
-    basePrice: 62.15,
-    baseDailyVolume: 36_500_000,
-    volumeProfile: 'distribution_outflow',
   },
 
   // Health Care (XLV)
@@ -422,9 +314,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLV',
     sectorName: 'Health Care',
     industry: 'Pharmaceuticals',
-    basePrice: 1443.50,
-    baseDailyVolume: 2_100_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'SYK',
@@ -433,9 +322,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLV',
     sectorName: 'Health Care',
     industry: 'Medical Devices',
-    basePrice: 309.64,
-    baseDailyVolume: 1_900_000,
-    volumeProfile: 'distribution_outflow',
   },
   {
     symbol: 'ISRG',
@@ -444,9 +330,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLV',
     sectorName: 'Health Care',
     industry: 'Robotic Surgery',
-    basePrice: 443.59,
-    baseDailyVolume: 1_600_000,
-    volumeProfile: 'quiet_pullback',
   },
 
   // Consumer Discretionary (XLY)
@@ -457,9 +340,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLY',
     sectorName: 'Cons Discretionary',
     industry: 'Footwear & Apparel',
-    basePrice: 86.82,
-    baseDailyVolume: 3_100_000,
-    volumeProfile: 'stealth_accumulation',
   },
   {
     symbol: 'TSLA',
@@ -468,9 +348,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLY',
     sectorName: 'Cons Discretionary',
     industry: 'Electric Vehicles & AI',
-    basePrice: 390.22,
-    baseDailyVolume: 32_300_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'AMZN',
@@ -479,9 +356,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLY',
     sectorName: 'Cons Discretionary',
     industry: 'E-Commerce & Cloud',
-    basePrice: 266.66,
-    baseDailyVolume: 31_100_000,
-    volumeProfile: 'sustained_inflow',
   },
 
   // Utilities (XLU)
@@ -492,9 +366,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLU',
     sectorName: 'Utilities',
     industry: 'Electric Utilities',
-    basePrice: 93.59,
-    baseDailyVolume: 6_200_000,
-    volumeProfile: 'stealth_accumulation',
   },
   {
     symbol: 'DUK',
@@ -503,9 +374,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLU',
     sectorName: 'Utilities',
     industry: 'Electric & Gas Power',
-    basePrice: 129.16,
-    baseDailyVolume: 4_100_000,
-    volumeProfile: 'stealth_accumulation',
   },
   {
     symbol: 'CEG',
@@ -514,9 +382,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLU',
     sectorName: 'Utilities',
     industry: 'Nuclear Power',
-    basePrice: 280.20,
-    baseDailyVolume: 2_300_000,
-    volumeProfile: 'surging_breakout',
   },
 
   // Materials (XLB)
@@ -527,9 +392,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLB',
     sectorName: 'Materials',
     industry: 'Specialty Chemicals',
-    basePrice: 349.89,
-    baseDailyVolume: 1_500_000,
-    volumeProfile: 'stealth_accumulation',
   },
   {
     symbol: 'FCX',
@@ -538,9 +400,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLB',
     sectorName: 'Materials',
     industry: 'Copper & Mining',
-    basePrice: 59.24,
-    baseDailyVolume: 9_400_000,
-    volumeProfile: 'quiet_pullback',
   },
 
   // Consumer Staples (XLP)
@@ -551,9 +410,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLP',
     sectorName: 'Cons Staples',
     industry: 'Beverages & Snacks',
-    basePrice: 145.44,
-    baseDailyVolume: 5_400_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'COST',
@@ -562,9 +418,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLP',
     sectorName: 'Cons Staples',
     industry: 'Retail Warehouse',
-    basePrice: 1106.21,
-    baseDailyVolume: 1_870_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'WMT',
@@ -573,9 +426,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLP',
     sectorName: 'Cons Staples',
     industry: 'Retail Stores',
-    basePrice: 128.09,
-    baseDailyVolume: 16_600_000,
-    volumeProfile: 'sustained_inflow',
   },
 
   // Real Estate (XLRE)
@@ -586,9 +436,6 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLRE',
     sectorName: 'Real Estate',
     industry: 'AI Data Centers',
-    basePrice: 1053.79,
-    baseDailyVolume: 450_000,
-    volumeProfile: 'sustained_inflow',
   },
   {
     symbol: 'DLR',
@@ -597,123 +444,8 @@ export const CORE_EQUITIES: InstrumentSeed[] = [
     sectorSymbol: 'XLRE',
     sectorName: 'Real Estate',
     industry: 'Data Center REIT',
-    basePrice: 179.99,
-    baseDailyVolume: 2_100_000,
-    volumeProfile: 'stealth_accumulation',
   },
 ];
-
-function createSeededRandom(seedStr: string) {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < seedStr.length; i++) {
-    h ^= seedStr.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return function next(): number {
-    h += 0x6d2b79f5;
-    let t = Math.imul(h ^ (h >>> 15), 1 | h);
-    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/**
- * Fallback calibrated OHLCV generator if live Yahoo Finance API is unreachable.
- * Anchors the final bar's close to exact `seed.basePrice`.
- */
-export function generateCalibratedOHLCV(seed: InstrumentSeed, totalDays = 252): RawOHLCV[] {
-  const rand = createSeededRandom(seed.symbol + '_2026_V2');
-  const rawUnscaled: RawOHLCV[] = [];
-
-  const dates: string[] = [];
-  const cursor = new Date();
-  while (dates.length < totalDays) {
-    const day = cursor.getDay();
-    if (day !== 0 && day !== 6) {
-      dates.push(cursor.toISOString().slice(0, 10));
-    }
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  dates.reverse();
-
-  let price = 100.0;
-
-  for (let i = 0; i < totalDays; i++) {
-    const daysFromEnd = totalDays - 1 - i;
-    const u1 = Math.max(0.0001, rand());
-    const u2 = rand();
-    const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-
-    let volMult = 0.85 + rand() * 0.32;
-    let dailyDrift = 0.0004;
-    let priceNoise = z * 0.012;
-
-    if (seed.volumeProfile === 'surging_breakout') {
-      if (daysFromEnd < 20 && daysFromEnd >= 5) {
-        volMult = 1.35 + rand() * 0.35;
-        dailyDrift = 0.0022;
-      } else if (daysFromEnd < 5) {
-        volMult = 1.65 + rand() * 0.45;
-        dailyDrift = 0.0045;
-      }
-    } else if (seed.volumeProfile === 'stealth_accumulation') {
-      if (daysFromEnd < 15) {
-        volMult = 1.38 + rand() * 0.32;
-        dailyDrift = 0.0008;
-        priceNoise = z * 0.0045;
-      }
-    } else if (seed.volumeProfile === 'sustained_inflow') {
-      if (daysFromEnd < 25) {
-        volMult = 1.25 + rand() * 0.3;
-        dailyDrift = 0.0018;
-      }
-    } else if (seed.volumeProfile === 'distribution_outflow') {
-      if (daysFromEnd < 15) {
-        volMult = 1.45 + rand() * 0.45;
-        dailyDrift = -0.0035;
-      }
-    }
-
-    const ret = dailyDrift + priceNoise;
-    const prevClose = price;
-    const close = Math.max(2.0, prevClose * (1 + ret));
-    const spread = close * (0.005 + rand() * 0.012);
-    const open = prevClose * (1 + (rand() - 0.5) * 0.006);
-    const high = Math.max(open, close) + spread * (0.25 + rand() * 0.65);
-    const low = Math.min(open, close) - spread * (0.25 + rand() * 0.65);
-    const volume = Math.round(seed.baseDailyVolume * volMult);
-
-    price = close;
-    rawUnscaled.push({
-      date: dates[i],
-      open,
-      high,
-      low,
-      close,
-      volume,
-    });
-  }
-
-  // Scale all prices so that the final day's close matches seed.basePrice exactly
-  const finalClose = rawUnscaled[rawUnscaled.length - 1].close;
-  const scale = seed.basePrice / Math.max(0.0001, finalClose);
-
-  return rawUnscaled.map((b, idx) => {
-    const isLast = idx === rawUnscaled.length - 1;
-    const close = isLast ? Number(seed.basePrice.toFixed(2)) : Number((b.close * scale).toFixed(2));
-    const open = Number((b.open * scale).toFixed(2));
-    const high = Number(Math.max(open, close, b.high * scale).toFixed(2));
-    const low = Number(Math.min(open, close, b.low * scale).toFixed(2));
-    return {
-      date: b.date,
-      open,
-      high,
-      low,
-      close,
-      volume: b.volume,
-    };
-  });
-}
 
 function average(nums: number[]): number {
   if (nums.length === 0) return 0;
@@ -780,7 +512,6 @@ function computeMetricsForBaseline(
     const dVol = cur.close * cur.volume;
     const isAbove = cur.volume >= baselineVol * 0.95;
 
-    // Combine close-vs-prevClose and intraday close position (buying off lows vs selling off highs)
     const spread = Math.max(0.01, cur.high - cur.low);
     const intradayBuyRatio = Math.max(0, Math.min(1, (cur.close - cur.low) / spread));
     const isUpDay = cur.close >= prev.close;
@@ -831,7 +562,6 @@ function computeMetricsForBaseline(
 
   const peakRecentRvol = Math.max(rvol1D, rvol5D, rvol20D);
 
-  // Plain-English Retail Trader Classification aligned strictly with actual price & volume action
   let regime: PriceVolumeRegime = 'Neutral Flow';
   let directionBias: VolumeDirectionBias = 'NEUTRAL';
   let directionalSummary = '◆ NORMAL / MIXED VOLUME';
@@ -966,10 +696,49 @@ function computeMetricsForBaseline(
   };
 }
 
+/**
+ * Builds an explicit 'unavailable' MarketInstrument with NO price fields, NO levels, and NO scores.
+ */
+export function buildUnavailableMarketInstrument(
+  seed: InstrumentSeed,
+  fetchedAt: string,
+  errorReason: string
+): MarketInstrument {
+  return {
+    symbol: seed.symbol,
+    name: seed.name,
+    isSectorETF: seed.isSectorETF,
+    sectorSymbol: seed.sectorSymbol,
+    sectorName: seed.sectorName,
+    industry: seed.industry,
+    dataStatus: 'unavailable',
+    asOfSession: null,
+    fetchedAt,
+    errorReason,
+    price: null,
+    lastPrice: null,
+    change1DPct: null,
+    change5DPct: null,
+    change20DPct: null,
+    change60DPct: null,
+    lastUpdated: null,
+    lastUpdatedTime: null,
+    metricsByBaseline: null,
+    history: [],
+    weeklyRvolSeries: [],
+  };
+}
+
 export function buildMarketInstrument(
-  seed: Omit<InstrumentSeed, 'basePrice' | 'baseDailyVolume' | 'volumeProfile'>,
+  seed: InstrumentSeed,
   rawBars: RawOHLCV[],
-  dataSource: 'live' | 'calibrated'
+  options: {
+    dataStatus: Exclude<DataStatus, 'unavailable'>;
+    asOfSession: string;
+    fetchedAt: string;
+    lastPrice?: number | null;
+    exchangeName?: string;
+  }
 ): MarketInstrument {
   const n = rawBars.length;
   const baseline90Vol = Math.max(
@@ -999,7 +768,7 @@ export function buildMarketInstrument(
 
     history.push({
       date: cur.date,
-      sessionCloseTime: '16:00 EST',
+      sessionCloseTime: cur.isHalfDay ? '13:00 EST (Half-Day)' : '16:00 EST',
       open: cur.open,
       high: cur.high,
       low: cur.low,
@@ -1015,6 +784,7 @@ export function buildMarketInstrument(
       rvol252,
       ma20Volume,
       ma90Volume,
+      isHalfDay: cur.isHalfDay,
     });
   }
 
@@ -1051,14 +821,18 @@ export function buildMarketInstrument(
     sectorSymbol: seed.sectorSymbol,
     sectorName: seed.sectorName,
     industry: seed.industry,
+    dataStatus: options.dataStatus,
+    asOfSession: options.asOfSession,
+    fetchedAt: options.fetchedAt,
+    exchangeName: options.exchangeName,
     price: lastBar.close,
+    lastPrice: options.lastPrice ?? lastBar.close,
     change1DPct: Number((((lastBar.close - prev1D.close) / prev1D.close) * 100).toFixed(2)),
     change5DPct: Number((((lastBar.close - prev5D.close) / prev5D.close) * 100).toFixed(2)),
     change20DPct: Number((((lastBar.close - prev20D.close) / prev20D.close) * 100).toFixed(2)),
     change60DPct: Number((((lastBar.close - prev60D.close) / prev60D.close) * 100).toFixed(2)),
-    dataSource,
     lastUpdated: lastBar.date,
-    lastUpdatedTime: '16:00 EST',
+    lastUpdatedTime: lastBar.isHalfDay ? '13:00 EST (Half-Day)' : '16:00 EST',
     metricsByBaseline: {
       '90D': computeMetricsForBaseline(rawBars, 90),
       '252D': computeMetricsForBaseline(rawBars, 252),
@@ -1069,9 +843,10 @@ export function buildMarketInstrument(
 }
 
 export function getRvolForTimeframe(
-  metrics: MultiTimeframeMetrics,
+  metrics: MultiTimeframeMetrics | null | undefined,
   timeframe: TimeframeWindow
 ): number {
+  if (!metrics) return 0;
   switch (timeframe) {
     case '1D':
       return metrics.rvol1D;
@@ -1087,7 +862,8 @@ export function getRvolForTimeframe(
 export function getPriceChangeForTimeframe(
   inst: MarketInstrument,
   timeframe: TimeframeWindow
-): number {
+): number | null {
+  if (inst.dataStatus === 'unavailable' || inst.price === null) return null;
   switch (timeframe) {
     case '1D':
       return inst.change1DPct;
@@ -1118,8 +894,8 @@ export function getBaselinePlainLabel(b: BaselinePeriod): string {
 }
 
 /**
- * Finds the single highest-conviction trade idea for the day across all stocks
- * by combining Sector Volume Strength + Stock RVOL + Multi-Week Consistency + Buying Pressure.
+ * Finds the single highest-conviction trade idea for the day across available stocks.
+ * Never selects a stock with dataStatus === 'unavailable' or missing metrics.
  */
 export function findTopDailyTradeIdea(
   instruments: MarketInstrument[],
@@ -1131,8 +907,16 @@ export function findTopDailyTradeIdea(
   convictionScore: number;
   reasons: string[];
 } | null {
-  const sectors = instruments.filter((i) => i.isSectorETF);
-  const stocks = instruments.filter((i) => !i.isSectorETF);
+  const sectors = instruments.filter(
+    (i) => i.isSectorETF && i.dataStatus !== 'unavailable' && i.metricsByBaseline
+  );
+  const stocks = instruments.filter(
+    (i) =>
+      !i.isSectorETF &&
+      i.dataStatus !== 'unavailable' &&
+      i.metricsByBaseline !== null &&
+      i.price !== null
+  );
   if (stocks.length === 0) return null;
 
   const sectorMap = new Map<string, MarketInstrument>(
@@ -1143,14 +927,14 @@ export function findTopDailyTradeIdea(
   let bestScore = -Infinity;
 
   for (const st of stocks) {
-    const m = st.metricsByBaseline[baseline];
+    const m = st.metricsByBaseline?.[baseline];
+    if (!m) continue;
     const sec = sectorMap.get(st.sectorSymbol);
-    const secM = sec?.metricsByBaseline[baseline];
+    const secM = sec?.metricsByBaseline?.[baseline];
 
     const rvol = getRvolForTimeframe(m, timeframe);
     const secRvol = secM ? getRvolForTimeframe(secM, timeframe) : 1.0;
 
-    // Prioritize stocks with strong buying volume, positive weekly momentum, high consistency, and sector backing
     const isBullish =
       m.directionBias === 'UPSIDE_BREAKOUT' ||
       m.directionBias === 'UPSIDE_ACCUMULATION';
@@ -1168,14 +952,14 @@ export function findTopDailyTradeIdea(
     }
   }
 
-  const m = bestStock.metricsByBaseline[baseline];
+  const m = bestStock.metricsByBaseline![baseline];
   const sec = sectorMap.get(bestStock.sectorSymbol);
-  const secM = sec?.metricsByBaseline[baseline];
+  const secM = sec?.metricsByBaseline?.[baseline];
   const activeRvol = getRvolForTimeframe(m, timeframe);
 
   const reasons: string[] = [
     `Sector Backing: ${bestStock.sectorName} (${bestStock.sectorSymbol}) is trading at ${
-      secM ? getRvolForTimeframe(secM, timeframe).toFixed(2) : '1.25'
+      secM ? getRvolForTimeframe(secM, timeframe).toFixed(2) : 'N/A'
     }x normal volume.`,
     `Consistent Activity: Volume beat its normal average on ${m.daysAboveBaseline20D} of the last 20 trading days.`,
     `Upside Buying Pressure: ${m.buyingVolumePct20D}% buying volume with ${activeRvol.toFixed(

@@ -9,6 +9,7 @@ import {
   TriggeredAlert,
   VolumeAlertRule,
 } from '../types/market';
+import { DataStatusChip } from './DataStatusChip';
 
 interface SurgeAlertsViewProps {
   alerts: VolumeAlertRule[];
@@ -42,6 +43,9 @@ export const SurgeAlertsView: React.FC<SurgeAlertsViewProps> = ({
     for (const rule of alerts) {
       if (!rule.enabled) continue;
       for (const inst of instruments) {
+        if (inst.dataStatus === 'unavailable' || !inst.metricsByBaseline || inst.price === null) {
+          continue;
+        }
         if (rule.scope === 'SECTORS' && !inst.isSectorETF) continue;
         if (rule.scope === 'STOCKS' && inst.isSectorETF) continue;
         if (
@@ -281,13 +285,14 @@ export const SurgeAlertsView: React.FC<SurgeAlertsViewProps> = ({
                   className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors flex items-center justify-between gap-3"
                 >
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono font-bold text-xs text-slate-900 dark:text-slate-100">
                         {trig.instrument.symbol}
                       </span>
                       <span className="text-xs text-slate-700 dark:text-slate-300 truncate">
                         {trig.instrument.name}
                       </span>
+                      <DataStatusChip instrument={trig.instrument} />
                       <span className="text-[11px] text-sky-600 dark:text-sky-400 font-medium truncate">
                         · {trig.ruleName}
                       </span>
@@ -322,9 +327,11 @@ export const SurgeAlertsView: React.FC<SurgeAlertsViewProps> = ({
                       >
                         {trig.rvolValue.toFixed(2)}x
                       </div>
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        ${trig.instrument.price.toFixed(2)}
-                      </div>
+                      {trig.instrument.price !== null && (
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          ${trig.instrument.price.toFixed(2)}
+                        </div>
+                      )}
                     </div>
 
                     {onPickAsDailyTrade && (

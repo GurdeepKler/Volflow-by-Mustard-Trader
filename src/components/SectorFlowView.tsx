@@ -10,6 +10,7 @@ import {
   MarketInstrument,
   TimeframeWindow,
 } from '../types/market';
+import { DataStatusChip } from './DataStatusChip';
 
 interface SectorFlowViewProps {
   instruments: MarketInstrument[];
@@ -38,8 +39,13 @@ export const SectorFlowView: React.FC<SectorFlowViewProps> = ({
     return instruments
       .filter((i) => i.isSectorETF)
       .sort((a, b) => {
-        const rvolA = getRvolForTimeframe(a.metricsByBaseline[baseline], timeframe);
-        const rvolB = getRvolForTimeframe(b.metricsByBaseline[baseline], timeframe);
+        const mA = a.metricsByBaseline?.[baseline];
+        const mB = b.metricsByBaseline?.[baseline];
+        if (!mA && !mB) return a.symbol.localeCompare(b.symbol);
+        if (!mA) return 1;
+        if (!mB) return -1;
+        const rvolA = getRvolForTimeframe(mA, timeframe);
+        const rvolB = getRvolForTimeframe(mB, timeframe);
         return rvolB - rvolA;
       });
   }, [instruments, baseline, timeframe]);
@@ -53,8 +59,13 @@ export const SectorFlowView: React.FC<SectorFlowViewProps> = ({
     return instruments
       .filter((i) => !i.isSectorETF && i.sectorSymbol === selectedSector.symbol)
       .sort((a, b) => {
-        const rvolA = getRvolForTimeframe(a.metricsByBaseline[baseline], timeframe);
-        const rvolB = getRvolForTimeframe(b.metricsByBaseline[baseline], timeframe);
+        const mA = a.metricsByBaseline?.[baseline];
+        const mB = b.metricsByBaseline?.[baseline];
+        if (!mA && !mB) return a.symbol.localeCompare(b.symbol);
+        if (!mA) return 1;
+        if (!mB) return -1;
+        const rvolA = getRvolForTimeframe(mA, timeframe);
+        const rvolB = getRvolForTimeframe(mB, timeframe);
         return rvolB - rvolA;
       });
   }, [instruments, selectedSector, baseline, timeframe]);
@@ -78,16 +89,18 @@ export const SectorFlowView: React.FC<SectorFlowViewProps> = ({
 
         <div className="divide-y divide-slate-200/70 dark:divide-slate-800/70">
           {sectors.map((sec, idx) => {
-            const m = sec.metricsByBaseline[baseline];
-            const activeRvol = getRvolForTimeframe(m, timeframe);
+            const m = sec.metricsByBaseline?.[baseline] ?? null;
+            const isUnavailable = sec.dataStatus === 'unavailable' || !m || sec.price === null;
+            const activeRvol = m ? getRvolForTimeframe(m, timeframe) : null;
             const activeChange = getPriceChangeForTimeframe(sec, timeframe);
             const isSelected = sec.symbol === selectedSector?.symbol;
 
             const isBullishBias =
-              m.directionBias === 'UPSIDE_BREAKOUT' ||
-              m.directionBias === 'UPSIDE_ACCUMULATION' ||
-              m.directionBias === 'BULLISH_LOW_VOL_PULLBACK';
-            const isBearishBias = m.directionBias === 'DOWNSIDE_DISTRIBUTION';
+              m &&
+              (m.directionBias === 'UPSIDE_BREAKOUT' ||
+                m.directionBias === 'UPSIDE_ACCUMULATION' ||
+                m.directionBias === 'BULLISH_LOW_VOL_PULLBACK');
+            const isBearishBias = m?.directionBias === 'DOWNSIDE_DISTRIBUTION';
 
             return (
               <div
@@ -112,7 +125,7 @@ export const SectorFlowView: React.FC<SectorFlowViewProps> = ({
                 }`}
               >
                 <div className="min-w-[180px]">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-xs text-slate-400 w-5">
                       #{idx + 1}
                     </span>
@@ -122,65 +135,76 @@ export const SectorFlowView: React.FC<SectorFlowViewProps> = ({
                     <span className="font-mono text-xs text-slate-500">
                       ({sec.symbol})
                     </span>
+                    <DataStatusChip instrument={sec} />
                   </div>
-                  <div className="mt-0.5 pl-7 text-xs">
-                    <span
-                      className={`font-mono font-semibold ${
-                        isBullishBias
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : isBearishBias
-                          ? 'text-rose-600 dark:text-rose-400'
-                          : 'text-amber-600 dark:text-amber-400'
-                      }`}
-                    >
-                      {m.directionalSummary}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-5 font-mono text-xs tabular-nums">
-                  <div className="text-right">
-                    <div className="text-[10px] font-sans text-slate-400">
-                      Steady Days
-                    </div>
-                    <div className="text-slate-700 dark:text-slate-300 font-medium">
-                      {m.daysAboveBaseline20D}/20d &gt; Normal
-                    </div>
-                  </div>
-
-                  <div className="text-right">
-                    <div className="text-[10px] font-sans text-slate-400">
-                      Buyers
-                    </div>
-                    <div className="text-emerald-600 dark:text-emerald-400 font-medium">
-                      {m.buyingVolumePct20D}% Buy
-                    </div>
-                  </div>
-
-                  <div className="text-right min-w-[85px]">
-                    <div
-                      className={`text-sm font-bold ${
-                        activeRvol >= 1.25
-                          ? isBearishBias
+                  {!isUnavailable && m && (
+                    <div className="mt-0.5 pl-7 text-xs">
+                      <span
+                        className={`font-mono font-semibold ${
+                          isBullishBias
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : isBearishBias
                             ? 'text-rose-600 dark:text-rose-400'
-                            : 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-slate-900 dark:text-slate-100'
-                      }`}
-                    >
-                      {activeRvol.toFixed(2)}x Vol
+                            : 'text-amber-600 dark:text-amber-400'
+                        }`}
+                      >
+                        {m.directionalSummary}
+                      </span>
                     </div>
-                    <div
-                      className={
-                        activeChange >= 0
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-rose-600 dark:text-rose-400'
-                      }
-                    >
-                      {activeChange >= 0 ? '+' : ''}
-                      {activeChange.toFixed(2)}%
+                  )}
+                </div>
+
+                {!isUnavailable && m && activeRvol !== null ? (
+                  <div className="flex items-center gap-5 font-mono text-xs tabular-nums">
+                    <div className="text-right">
+                      <div className="text-[10px] font-sans text-slate-400">
+                        Steady Days
+                      </div>
+                      <div className="text-slate-700 dark:text-slate-300 font-medium">
+                        {m.daysAboveBaseline20D}/20d &gt; Normal
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="text-[10px] font-sans text-slate-400">
+                        Buyers
+                      </div>
+                      <div className="text-emerald-600 dark:text-emerald-400 font-medium">
+                        {m.buyingVolumePct20D}% Buy
+                      </div>
+                    </div>
+
+                    <div className="text-right min-w-[85px]">
+                      <div
+                        className={`text-sm font-bold ${
+                          activeRvol >= 1.25
+                            ? isBearishBias
+                              ? 'text-rose-600 dark:text-rose-400'
+                              : 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-slate-900 dark:text-slate-100'
+                        }`}
+                      >
+                        {activeRvol.toFixed(2)}x Vol
+                      </div>
+                      {activeChange !== null && (
+                        <div
+                          className={
+                            activeChange >= 0
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-rose-600 dark:text-rose-400'
+                          }
+                        >
+                          {activeChange >= 0 ? '+' : ''}
+                          {activeChange.toFixed(2)}%
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="font-mono text-xs text-rose-500">
+                    Market data unavailable
+                  </div>
+                )}
               </div>
             );
           })}
@@ -203,16 +227,18 @@ export const SectorFlowView: React.FC<SectorFlowViewProps> = ({
 
           <div className="divide-y divide-slate-200/70 dark:divide-slate-800/70">
             {constituentStocks.map((st) => {
-              const m = st.metricsByBaseline[baseline];
-              const activeRvol = getRvolForTimeframe(m, timeframe);
+              const m = st.metricsByBaseline?.[baseline] ?? null;
+              const isUnavailable = st.dataStatus === 'unavailable' || !m || st.price === null;
+              const activeRvol = m ? getRvolForTimeframe(m, timeframe) : null;
               const chg = getPriceChangeForTimeframe(st, timeframe);
               const isCurrent = st.symbol === selectedInstrumentSymbol;
               const isPicked = st.symbol === selectedTradeSymbol;
               const isBullish =
-                m.directionBias === 'UPSIDE_BREAKOUT' ||
-                m.directionBias === 'UPSIDE_ACCUMULATION' ||
-                m.directionBias === 'BULLISH_LOW_VOL_PULLBACK';
-              const isBearish = m.directionBias === 'DOWNSIDE_DISTRIBUTION';
+                m &&
+                (m.directionBias === 'UPSIDE_BREAKOUT' ||
+                  m.directionBias === 'UPSIDE_ACCUMULATION' ||
+                  m.directionBias === 'BULLISH_LOW_VOL_PULLBACK');
+              const isBearish = m?.directionBias === 'DOWNSIDE_DISTRIBUTION';
 
               return (
                 <div
@@ -225,90 +251,103 @@ export const SectorFlowView: React.FC<SectorFlowViewProps> = ({
                   }`}
                 >
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-sm font-bold text-slate-900 dark:text-slate-100">
                         {st.symbol}
                       </span>
                       <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
                         {st.name}
                       </span>
-                      <span className="font-mono text-xs text-slate-500">
-                        ${st.price.toFixed(2)}
-                      </span>
+                      {!isUnavailable && st.price !== null && (
+                        <span className="font-mono text-xs text-slate-500">
+                          ${st.price.toFixed(2)}
+                        </span>
+                      )}
+                      <DataStatusChip instrument={st} />
                     </div>
-                    <div className="mt-0.5 text-xs">
-                      <span
-                        className={`font-mono font-semibold ${
-                          isBullish
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : isBearish
-                            ? 'text-rose-600 dark:text-rose-400'
-                            : 'text-amber-600 dark:text-amber-400'
-                        }`}
-                      >
-                        {m.directionalSummary}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4 font-mono text-xs tabular-nums">
-                    <div className="text-right">
-                      <div className="text-[10px] font-sans text-slate-400">
-                        Steady
-                      </div>
-                      <div>{m.daysAboveBaseline20D}/20d</div>
-                    </div>
-
-                    <div className="text-right min-w-[75px]">
-                      <div
-                        className={`font-bold ${
-                          activeRvol >= 1.3
-                            ? isBearish
+                    {!isUnavailable && m && (
+                      <div className="mt-0.5 text-xs">
+                        <span
+                          className={`font-mono font-semibold ${
+                            isBullish
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : isBearish
                               ? 'text-rose-600 dark:text-rose-400'
-                              : 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-slate-900 dark:text-slate-100'
-                        }`}
-                      >
-                        {activeRvol.toFixed(2)}x Vol
+                              : 'text-amber-600 dark:text-amber-400'
+                          }`}
+                        >
+                          {m.directionalSummary}
+                        </span>
                       </div>
-                      <div
-                        className={
-                          chg >= 0
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-rose-600 dark:text-rose-400'
-                        }
-                      >
-                        {chg >= 0 ? '+' : ''}
-                        {chg.toFixed(2)}%
-                      </div>
-                    </div>
-
-                    {onPickAsDailyTrade && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onPickAsDailyTrade(st.symbol);
-                        }}
-                        className={`px-2.5 py-1.5 text-xs font-sans font-medium rounded transition-colors inline-flex items-center gap-1 whitespace-nowrap shrink-0 ${
-                          isPicked
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-slate-100 dark:bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        {isPicked ? (
-                          <>
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>#1 Pick</span>
-                          </>
-                        ) : (
-                          <>
-                            <Target className="w-3 h-3" />
-                            <span>Pick #1</span>
-                          </>
-                        )}
-                      </button>
                     )}
                   </div>
+
+                  {!isUnavailable && m && activeRvol !== null ? (
+                    <div className="flex items-center gap-4 font-mono text-xs tabular-nums">
+                      <div className="text-right">
+                        <div className="text-[10px] font-sans text-slate-400">
+                          Steady
+                        </div>
+                        <div>{m.daysAboveBaseline20D}/20d</div>
+                      </div>
+
+                      <div className="text-right min-w-[75px]">
+                        <div
+                          className={`font-bold ${
+                            activeRvol >= 1.3
+                              ? isBearish
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-slate-900 dark:text-slate-100'
+                          }`}
+                        >
+                          {activeRvol.toFixed(2)}x Vol
+                        </div>
+                        {chg !== null && (
+                          <div
+                            className={
+                              chg >= 0
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-rose-600 dark:text-rose-400'
+                            }
+                          >
+                            {chg >= 0 ? '+' : ''}
+                            {chg.toFixed(2)}%
+                          </div>
+                        )}
+                      </div>
+
+                      {onPickAsDailyTrade && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onPickAsDailyTrade(st.symbol);
+                          }}
+                          className={`px-2.5 py-1.5 text-xs font-sans font-medium rounded transition-colors inline-flex items-center gap-1 whitespace-nowrap shrink-0 ${
+                            isPicked
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {isPicked ? (
+                            <>
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>#1 Pick</span>
+                            </>
+                          ) : (
+                            <>
+                              <Target className="w-3 h-3" />
+                              <span>Pick #1</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="font-mono text-xs text-rose-500">
+                      Market data unavailable
+                    </div>
+                  )}
                 </div>
               );
             })}

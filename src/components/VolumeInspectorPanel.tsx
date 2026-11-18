@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
+  AlertCircle,
   ArrowDownRight,
   ArrowUpRight,
   BarChart3,
@@ -7,7 +8,6 @@ import {
   Crosshair,
   Maximize2,
   Minimize2,
-  ShieldCheck,
   Target,
   TrendingDown,
   TrendingUp,
@@ -22,6 +22,7 @@ import {
   MarketInstrument,
   TimeframeWindow,
 } from '../types/market';
+import { DataStatusChip } from './DataStatusChip';
 
 interface VolumeInspectorPanelProps {
   instrument: MarketInstrument;
@@ -57,16 +58,23 @@ export const VolumeInspectorPanel: React.FC<VolumeInspectorPanelProps> = ({
   const [hoveredBarIndex, setHoveredBarIndex] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  const metrics = instrument.metricsByBaseline[baseline];
+  const metrics = instrument.metricsByBaseline?.[baseline] ?? null;
   const baselineLabel = getBaselinePlainLabel(baseline);
   const isPickedAsDailyTrade = selectedTradeSymbol === instrument.symbol;
+  const isUnavailable =
+    instrument.dataStatus === 'unavailable' ||
+    !metrics ||
+    instrument.price === null ||
+    instrument.history.length === 0;
 
   const visibleHistory = useMemo(() => {
+    if (isUnavailable) return [];
     return instrument.history.slice(-chartWindowDays);
-  }, [instrument.history, chartWindowDays]);
+  }, [instrument.history, chartWindowDays, isUnavailable]);
 
   // Compute 20-day Simple Moving Average of Close price for every visible bar
   const priceMa20Series = useMemo(() => {
+    if (isUnavailable) return [];
     const fullHistory = instrument.history;
     const totalLen = fullHistory.length;
     const startOffset = Math.max(0, totalLen - visibleHistory.length);
@@ -78,7 +86,7 @@ export const VolumeInspectorPanel: React.FC<VolumeInspectorPanelProps> = ({
       const sum = windowBars.reduce((acc, b) => acc + b.close, 0);
       return sum / Math.max(1, windowBars.length);
     });
-  }, [instrument.history, visibleHistory]);
+  }, [instrument.history, visibleHistory, isUnavailable]);
 
   const activeBar: DailyBar | undefined =
     hoveredBarIndex !== null && visibleHistory[hoveredBarIndex]
@@ -86,7 +94,7 @@ export const VolumeInspectorPanel: React.FC<VolumeInspectorPanelProps> = ({
       : visibleHistory[visibleHistory.length - 1];
 
   const chartStats = useMemo(() => {
-    if (visibleHistory.length === 0) {
+    if (visibleHistory.length === 0 || !metrics) {
       return {
         minPrice: 0,
         maxPrice: 100,
@@ -125,7 +133,7 @@ export const VolumeInspectorPanel: React.FC<VolumeInspectorPanelProps> = ({
       rawHigh,
       maxVol: maxVol * 1.15 || 1,
     };
-  }, [visibleHistory, priceMa20Series, metrics.baselineVol]);
+  }, [visibleHistory, priceMa20Series, metrics]);
 
   const svgWidth = isExpanded ? 1140 : 680;
   const leftPad = 14;
@@ -209,13 +217,13 @@ export const VolumeInspectorPanel: React.FC<VolumeInspectorPanelProps> = ({
   }, [visibleHistory, chartStats, isExpanded]);
 
   const baselineVolY = useMemo(() => {
-    const bVol = metrics.baselineVol;
+    const bVol = metrics?.baselineVol ?? 0;
     return (
       volTop +
       volHeight -
       Math.min(1, bVol / chartStats.maxVol) * (volHeight - 8)
     );
-  }, [metrics.baselineVol, chartStats.maxVol, isExpanded]);
+  }, [metrics, chartStats.maxVol, isExpanded]);
 
   const xDateTicks = useMemo(() => {
     const n = visibleHistory.length;
@@ -254,6 +262,34 @@ export const VolumeInspectorPanel: React.FC<VolumeInspectorPanelProps> = ({
     setHoveredBarIndex(idx);
   };
 
+  if (isUnavailable || !metrics || instrument.price === null) {
+    return (
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden flex flex-col">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-lg font-bold text-slate-900 dark:text-slate-100">
+              {instrument.symbol}
+            </span>
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              {instrument.name}
+            </span>
+            <DataStatusChip instrument={instrument} />
+          </div>
+        </div>
+        <div className="p-10 text-center space-y-2">
+          <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+            No market data available for {instrument.symbol}
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+            {instrument.errorReason ||
+              'Real daily OHLCV bars could not be loaded from Yahoo Finance. No price, score, or chart is displayed.'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const isUpsideBias =
     metrics.directionBias === 'UPSIDE_BREAKOUT' ||
     metrics.directionBias === 'UPSIDE_ACCUMULATION' ||
@@ -261,6 +297,8 @@ export const VolumeInspectorPanel: React.FC<VolumeInspectorPanelProps> = ({
   const isDownsideBias = metrics.directionBias === 'DOWNSIDE_DISTRIBUTION';
 
   const latestCloseY = getPriceY(instrument.price);
+  const change1D = instrument.change1DPct ?? 0;
+  const change5D = instrument.change5DPct ?? 0;
 
   return (
     <div
@@ -280,17 +318,13 @@ export const VolumeInspectorPanel: React.FC<VolumeInspectorPanelProps> = ({
             <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
               {instrument.name}
             </span>
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-mono text-[10px] font-medium">
-              <ShieldCheck className="w-3 h-3" />
-              <span>
-                {instrument.dataSource === 'live'
-                  ? `Verified Close (${instrument.lastUpdated})`
-                  : `Calibrated (${instrument.lastUpdated})`}
-              </span>
-            </span>
+            <DataStatusChip instrument={instrument} />
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono tabular-nums">
             {instrument.isSectorETF ? 'Market Sector ETF' : `${instrument.sectorName} Sector`} · {chartWindowDays === 252 ? '1Y' : `${chartWindowDays}D`} Range: ${chartStats.rawLow.toFixed(2)} – ${chartStats.rawHigh.toFixed(2)}
+            {instrument.lastPrice !== null && instrument.lastPrice !== instrument.price
+              ? ` · Last trade: $${instrument.lastPrice.toFixed(2)}`
+              : ''}
           </div>
         </div>
 
@@ -301,19 +335,19 @@ export const VolumeInspectorPanel: React.FC<VolumeInspectorPanelProps> = ({
             </div>
             <div
               className={`inline-flex items-center gap-0.5 font-mono text-xs font-medium tabular-nums ${
-                instrument.change1DPct >= 0
+                change1D >= 0
                   ? 'text-emerald-600 dark:text-emerald-400'
                   : 'text-rose-600 dark:text-rose-400'
               }`}
             >
-              {instrument.change1DPct >= 0 ? (
+              {change1D >= 0 ? (
                 <ArrowUpRight className="w-3 h-3" />
               ) : (
                 <ArrowDownRight className="w-3 h-3" />
               )}
               <span>
-                {instrument.change1DPct >= 0 ? '+' : ''}
-                {instrument.change1DPct.toFixed(2)}% (1D)
+                {change1D >= 0 ? '+' : ''}
+                {change1D.toFixed(2)}% (1D)
               </span>
             </div>
           </div>
@@ -392,8 +426,8 @@ export const VolumeInspectorPanel: React.FC<VolumeInspectorPanelProps> = ({
             </span>
           </div>
           <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
-            5D Price: {instrument.change5DPct >= 0 ? '+' : ''}
-            {instrument.change5DPct.toFixed(2)}%
+            5D Price: {change5D >= 0 ? '+' : ''}
+            {change5D.toFixed(2)}%
           </span>
         </div>
         <p className="mt-1 text-slate-700 dark:text-slate-300 font-medium">

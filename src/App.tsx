@@ -5,12 +5,14 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AlertCircle,
   Bell,
   BookOpen,
   CalendarClock,
   CheckCircle2,
   Clock,
   Layers,
+  ListFilter,
   Moon,
   Plus,
   RefreshCw,
@@ -20,19 +22,16 @@ import {
   X,
 } from 'lucide-react';
 import { CheckpointJournalView } from './components/CheckpointJournalView';
+import { DataStatusChip } from './components/DataStatusChip';
+import { PreMarketShortlistView } from './components/PreMarketShortlistView';
 import { SectorFlowView } from './components/SectorFlowView';
 import { SurgeAlertsView } from './components/SurgeAlertsView';
 import { VolumeInspectorPanel } from './components/VolumeInspectorPanel';
 import { VolumeScannerView } from './components/VolumeScannerView';
 import {
-  buildMarketInstrument,
-  CORE_EQUITIES,
   findTopDailyTradeIdea,
-  generateCalibratedOHLCV,
   getRvolForTimeframe,
-  getTimeframePlainLabel,
   GICS_SECTORS,
-  InstrumentSeed,
 } from './lib/volumeAnalytics';
 import {
   BaselinePeriod,
@@ -42,10 +41,10 @@ import {
   VolumeAlertRule,
 } from './types/market';
 
-type WorkspaceTab = 'sectors' | 'scanner' | 'alerts' | 'journal';
+type WorkspaceTab = 'sectors' | 'scanner' | 'alerts' | 'journal' | 'shortlist';
 
 function formatReadableDate(isoDateStr: string): string {
-  if (!isoDateStr) return 'Latest Market Session';
+  if (!isoDateStr) return 'Unavailable';
   const parts = isoDateStr.split('-').map(Number);
   if (parts.length !== 3) return isoDateStr;
   const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0));
@@ -81,6 +80,7 @@ export default function App() {
   const [journal, setJournal] = useState<CheckpointSnapshot[]>([]);
   const [alerts, setAlerts] = useState<VolumeAlertRule[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [universeFetchError, setUniverseFetchError] = useState<string | null>(null);
 
   const [marketSessionDate, setMarketSessionDate] = useState<string>('');
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(
@@ -104,8 +104,6 @@ export default function App() {
   const [newTickerSymbol, setNewTickerSymbol] = useState<string>('');
   const [newTickerName, setNewTickerName] = useState<string>('');
   const [newTickerSector, setNewTickerSector] = useState<string>('XLK');
-  const [newTickerProfile, setNewTickerProfile] =
-    useState<InstrumentSeed['volumeProfile']>('surging_breakout');
   const [addingTicker, setAddingTicker] = useState<boolean>(false);
   const [tickerError, setTickerError] = useState<string>('');
 
@@ -139,29 +137,25 @@ export default function App() {
     return () => clearInterval(timer);
   }, [lastRefreshedAt]);
 
-  const buildLocalFallbackUniverse = (): MarketInstrument[] => {
-    const allSeeds = [...GICS_SECTORS, ...CORE_EQUITIES];
-    return allSeeds.map((seed) =>
-      buildMarketInstrument(seed, generateCalibratedOHLCV(seed, 252), 'calibrated')
-    );
-  };
-
   const fetchUniverse = async () => {
     setIsLoading(true);
+    setUniverseFetchError(null);
     try {
       const res = await fetch('/api/market/universe');
-      if (!res.ok) throw new Error('Failed to fetch universe');
-      const data = await res.json();
-      if (Array.isArray(data.instruments) && data.instruments.length > 0) {
-        setInstruments(data.instruments);
-        setMarketSessionDate(
-          data.marketSessionDate || data.instruments[0].lastUpdated
-        );
-      } else {
-        const fallback = buildLocalFallbackUniverse();
-        setInstruments(fallback);
-        setMarketSessionDate(fallback[0]?.lastUpdated || '');
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Failed to load market universe`);
       }
+      const data = await res.json();
+      if (!Array.isArray(data.instruments) || data.instruments.length === 0) {
+        throw new Error('No market instruments returned from server');
+      }
+      setInstruments(data.instruments);
+      const firstValid = data.instruments.find(
+        (i: MarketInstrument) => i.asOfSession !== null
+      );
+      setMarketSessionDate(
+        firstValid?.asOfSession || data.marketSessionDate || ''
+      );
       if (Array.isArray(data.journal)) {
         setJournal(data.journal);
       }
@@ -170,12 +164,13 @@ export default function App() {
       }
       setLastRefreshedAt(data.lastRefreshedAt || new Date().toISOString());
       setSecondsSinceRefresh(0);
-    } catch {
-      const fallback = buildLocalFallbackUniverse();
-      setInstruments(fallback);
-      setMarketSessionDate(fallback[0]?.lastUpdated || '');
-      setLastRefreshedAt(new Date().toISOString());
-      setSecondsSinceRefresh(0);
+    } catch (err) {
+      setInstruments([]);
+      setUniverseFetchError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to load market data from server.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -191,46 +186,47 @@ export default function App() {
     setRefreshProgress(25);
     setRefreshStatusText('Checking latest daily volume across 11 Market Sectors...');
 
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 250));
     setRefreshProgress(65);
     setRefreshStatusText('Comparing Today, Week & Month volume against Normal...');
 
     try {
       const res = await fetch('/api/market/refresh', { method: 'POST' });
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 250));
       setRefreshProgress(90);
 
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.instruments) && data.instruments.length > 0) {
-          setInstruments(data.instruments);
-          setMarketSessionDate(
-            data.marketSessionDate || data.instruments[0].lastUpdated
-          );
-        }
-        const nowIso = data.lastRefreshedAt || new Date().toISOString();
-        setLastRefreshedAt(nowIso);
-        setSecondsSinceRefresh(0);
-      } else {
-        const fallback = buildLocalFallbackUniverse();
-        setInstruments(fallback);
-        setLastRefreshedAt(new Date().toISOString());
-        setSecondsSinceRefresh(0);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Refresh failed`);
       }
-    } catch {
-      const fallback = buildLocalFallbackUniverse();
-      setInstruments(fallback);
-      setLastRefreshedAt(new Date().toISOString());
-      setSecondsSinceRefresh(0);
-    }
 
-    await new Promise((r) => setTimeout(r, 180));
-    setRefreshProgress(100);
-    setRefreshStage('completed');
-    setRefreshStatusText(
-      `Refresh Finished at ${formatExactTime(new Date().toISOString())}`
-    );
+      const data = await res.json();
+      if (Array.isArray(data.instruments) && data.instruments.length > 0) {
+        setInstruments(data.instruments);
+        setUniverseFetchError(null);
+        const firstValid = data.instruments.find(
+          (i: MarketInstrument) => i.asOfSession !== null
+        );
+        setMarketSessionDate(
+          firstValid?.asOfSession || data.marketSessionDate || ''
+        );
+      }
+      const nowIso = data.lastRefreshedAt || new Date().toISOString();
+      setLastRefreshedAt(nowIso);
+      setSecondsSinceRefresh(0);
+      setRefreshProgress(100);
+      setRefreshStage('completed');
+      setRefreshStatusText(`Refresh Finished at ${formatExactTime(nowIso)}`);
+    } catch (err) {
+      setRefreshStage('idle');
+      setUniverseFetchError(
+        err instanceof Error ? err.message : 'Market data refresh failed.'
+      );
+    }
   };
+
+  const unavailableCount = useMemo(() => {
+    return instruments.filter((i) => i.dataStatus === 'unavailable').length;
+  }, [instruments]);
 
   const autoTradeIdea = useMemo(() => {
     return findTopDailyTradeIdea(instruments, baseline, timeframe);
@@ -240,11 +236,21 @@ export default function App() {
     userPickedTradeSymbol || autoTradeIdea?.stock.symbol || 'NVDA';
 
   const activeDailyTradeInstrument = useMemo(() => {
-    return (
+    const candidate =
       instruments.find((i) => i.symbol === activeDailyTradeSymbol) ||
       autoTradeIdea?.stock ||
-      instruments[0]
-    );
+      instruments.find(
+        (i) => i.dataStatus !== 'unavailable' && i.price !== null && i.metricsByBaseline !== null
+      );
+    if (
+      !candidate ||
+      candidate.dataStatus === 'unavailable' ||
+      candidate.price === null ||
+      candidate.metricsByBaseline === null
+    ) {
+      return null;
+    }
+    return candidate;
   }, [instruments, activeDailyTradeSymbol, autoTradeIdea]);
 
   const inspectedInstrument = useMemo(() => {
@@ -259,6 +265,9 @@ export default function App() {
     for (const rule of alerts) {
       if (!rule.enabled) continue;
       for (const inst of instruments) {
+        if (inst.dataStatus === 'unavailable' || !inst.metricsByBaseline) {
+          continue;
+        }
         if (rule.scope === 'SECTORS' && !inst.isSectorETF) continue;
         if (rule.scope === 'STOCKS' && inst.isSectorETF) continue;
         if (
@@ -311,13 +320,17 @@ export default function App() {
           symbol: cleanSymbol,
           name: newTickerName.trim(),
           sectorSymbol: newTickerSector,
-          volumeProfile: newTickerProfile,
         }),
       });
 
-      if (!res.ok) throw new Error('Could not add ticker');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setTickerError(
+          data?.error || 'Failed to load market data from Yahoo Finance'
+        );
+        return;
+      }
 
-      const data = await res.json();
       if (data.instrument) {
         setInstruments((prev) => {
           const without = prev.filter((i) => i.symbol !== data.instrument.symbol);
@@ -332,35 +345,7 @@ export default function App() {
         setNewTickerName('');
       }
     } catch {
-      const secObj =
-        GICS_SECTORS.find((s) => s.symbol === newTickerSector) || GICS_SECTORS[0];
-      const seed: InstrumentSeed = {
-        symbol: cleanSymbol,
-        name: newTickerName.trim() || `${cleanSymbol} Corp.`,
-        isSectorETF: false,
-        sectorSymbol: secObj.symbol,
-        sectorName: secObj.sectorName,
-        industry: 'Custom Stock',
-        basePrice: 120.0,
-        baseDailyVolume: 7_500_000,
-        volumeProfile: newTickerProfile,
-      };
-      const localInst = buildMarketInstrument(
-        seed,
-        generateCalibratedOHLCV(seed, 252),
-        'calibrated'
-      );
-      setInstruments((prev) => [
-        localInst,
-        ...prev.filter((i) => i.symbol !== cleanSymbol),
-      ]);
-      setSelectedSectorSymbol(localInst.sectorSymbol);
-      setSelectedInstrumentSymbol(localInst.symbol);
-      setLastRefreshedAt(new Date().toISOString());
-      setSecondsSinceRefresh(0);
-      setShowAddTickerModal(false);
-      setNewTickerSymbol('');
-      setNewTickerName('');
+      setTickerError('Failed to load market data from Yahoo Finance');
     } finally {
       setAddingTicker(false);
     }
@@ -368,10 +353,11 @@ export default function App() {
 
   const openCheckpointModal = () => {
     const tradeInst = activeDailyTradeInstrument;
-    const m = tradeInst?.metricsByBaseline[baseline];
-    const defaultTitle = tradeInst
-      ? `Today's #1 Trade Idea: ${tradeInst.symbol} (${tradeInst.name}) at $${tradeInst.price.toFixed(2)}`
-      : `${checkpointCadence} Volume Trade Note`;
+    const m = tradeInst?.metricsByBaseline?.[baseline];
+    const defaultTitle =
+      tradeInst && tradeInst.price !== null
+        ? `Today's #1 Trade Idea: ${tradeInst.symbol} (${tradeInst.name}) at $${tradeInst.price.toFixed(2)}`
+        : `${checkpointCadence} Volume Trade Note`;
     setCheckpointTitle(defaultTitle);
     setCheckpointNotes(
       tradeInst && m
@@ -387,50 +373,57 @@ export default function App() {
   const handleSaveCheckpoint = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const topSectors = instruments
+    const validInstruments = instruments.filter(
+      (i) =>
+        i.dataStatus !== 'unavailable' &&
+        i.metricsByBaseline !== null &&
+        i.price !== null
+    );
+
+    const topSectors = validInstruments
       .filter((i) => i.isSectorETF)
       .sort(
         (a, b) =>
-          b.metricsByBaseline[baseline].rvol5D -
-          a.metricsByBaseline[baseline].rvol5D
+          b.metricsByBaseline![baseline].rvol5D -
+          a.metricsByBaseline![baseline].rvol5D
       )
       .slice(0, 4)
       .map((s) => ({
         symbol: s.symbol,
         name: s.sectorName,
-        rvol5D: s.metricsByBaseline[baseline].rvol5D,
-        rvol20D: s.metricsByBaseline[baseline].rvol20D,
-        consistencyScore: s.metricsByBaseline[baseline].consistencyScore,
-        regime: s.metricsByBaseline[baseline].regime,
-        change5DPct: s.change5DPct,
+        rvol5D: s.metricsByBaseline![baseline].rvol5D,
+        rvol20D: s.metricsByBaseline![baseline].rvol20D,
+        consistencyScore: s.metricsByBaseline![baseline].consistencyScore,
+        regime: s.metricsByBaseline![baseline].regime,
+        change5DPct: s.change5DPct ?? 0,
       }));
 
-    const topStocks = instruments
+    const topStocks = validInstruments
       .filter((i) => !i.isSectorETF)
       .sort(
         (a, b) =>
-          b.metricsByBaseline[baseline].consistencyScore -
-          a.metricsByBaseline[baseline].consistencyScore
+          b.metricsByBaseline![baseline].consistencyScore -
+          a.metricsByBaseline![baseline].consistencyScore
       )
       .slice(0, 6)
       .map((st) => ({
         symbol: st.symbol,
         name: st.name,
         sectorSymbol: st.sectorSymbol,
-        price: st.price,
-        rvol1D: st.metricsByBaseline[baseline].rvol1D,
-        rvol5D: st.metricsByBaseline[baseline].rvol5D,
-        rvol20D: st.metricsByBaseline[baseline].rvol20D,
-        consistencyScore: st.metricsByBaseline[baseline].consistencyScore,
+        price: st.price!,
+        rvol1D: st.metricsByBaseline![baseline].rvol1D,
+        rvol5D: st.metricsByBaseline![baseline].rvol5D,
+        rvol20D: st.metricsByBaseline![baseline].rvol20D,
+        consistencyScore: st.metricsByBaseline![baseline].consistencyScore,
         daysAboveBaseline20D:
-          st.metricsByBaseline[baseline].daysAboveBaseline20D,
-        regime: st.metricsByBaseline[baseline].regime,
+          st.metricsByBaseline![baseline].daysAboveBaseline20D,
+        regime: st.metricsByBaseline![baseline].regime,
       }));
 
     const newSnapshot: CheckpointSnapshot = {
       id: `chk-${Date.now()}`,
       timestamp: new Date().toISOString(),
-      dateLabel: new Date().toISOString().slice(0, 10),
+      dateLabel: marketSessionDate || new Date().toISOString().slice(0, 10),
       cadence: checkpointCadence,
       title: checkpointTitle.trim() || `Today's Trade Note`,
       notes: checkpointNotes.trim(),
@@ -523,6 +516,12 @@ export default function App() {
           subtitle:
             'Your saved trade ideas and past check-ins to verify if volume held up.',
         };
+      case 'shortlist':
+        return {
+          title: '5. Pre-Market Shortlist',
+          subtitle:
+            'Daily Silent Flip pre-market shortlist (5–8 US stocks), key levels (FH, RH, RL, FL), T1–T5 bench evaluation, and TradingView export.',
+        };
     }
   }, [activeTab]);
 
@@ -584,6 +583,12 @@ export default function App() {
                   label: '4. Daily Notes',
                   badge: `${journal.length}`,
                   icon: BookOpen,
+                },
+                {
+                  id: 'shortlist',
+                  label: '5. Pre-Market Shortlist',
+                  badge: '5–8',
+                  icon: ListFilter,
                 },
               ] as const
             ).map((nav) => {
@@ -676,56 +681,61 @@ export default function App() {
         </div>
 
         {/* Bottom of Sidebar: Today's #1 Trade Pick Box */}
-        {activeDailyTradeInstrument && (
-          <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-sky-500/5 dark:bg-sky-500/10 space-y-2.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-sky-700 dark:text-sky-300 flex items-center gap-1.5">
-                <Target className="w-3.5 h-3.5" />
-                <span>Today's #1 Trade Pick</span>
-              </span>
-              {userPickedTradeSymbol && (
-                <button
-                  onClick={() => setUserPickedTradeSymbol('')}
-                  className="text-[10px] text-slate-400 hover:text-slate-200 underline"
-                >
-                  Auto
-                </button>
-              )}
-            </div>
+        {activeDailyTradeInstrument &&
+          activeDailyTradeInstrument.price !== null &&
+          activeDailyTradeInstrument.metricsByBaseline !== null && (
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-sky-500/5 dark:bg-sky-500/10 space-y-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-sky-700 dark:text-sky-300 flex items-center gap-1.5">
+                  <Target className="w-3.5 h-3.5" />
+                  <span>Today's #1 Trade Pick</span>
+                </span>
+                {userPickedTradeSymbol && (
+                  <button
+                    onClick={() => setUserPickedTradeSymbol('')}
+                    className="text-[10px] text-slate-400 hover:text-slate-200 underline"
+                  >
+                    Auto
+                  </button>
+                )}
+              </div>
 
-            <div
-              onClick={() =>
-                setSelectedInstrumentSymbol(activeDailyTradeInstrument.symbol)
-              }
-              className="p-2.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 cursor-pointer hover:border-sky-500 transition-colors"
-            >
-              <div className="flex items-baseline justify-between">
-                <span className="font-mono font-bold text-sm text-slate-900 dark:text-slate-100">
-                  {activeDailyTradeInstrument.symbol}
-                </span>
-                <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">
-                  ${activeDailyTradeInstrument.price.toFixed(2)}
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                {activeDailyTradeInstrument.name}
-              </div>
-              <div className="mt-1 font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 truncate">
-                {
-                  activeDailyTradeInstrument.metricsByBaseline[baseline]
-                    .directionalSummary
+              <div
+                onClick={() =>
+                  setSelectedInstrumentSymbol(activeDailyTradeInstrument.symbol)
                 }
+                className="p-2.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 cursor-pointer hover:border-sky-500 transition-colors"
+              >
+                <div className="flex items-baseline justify-between">
+                  <span className="font-mono font-bold text-sm text-slate-900 dark:text-slate-100">
+                    {activeDailyTradeInstrument.symbol}
+                  </span>
+                  <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    ${activeDailyTradeInstrument.price.toFixed(2)}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                  {activeDailyTradeInstrument.name}
+                </div>
+                <div className="mt-1">
+                  <DataStatusChip instrument={activeDailyTradeInstrument} />
+                </div>
+                <div className="mt-1 font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 truncate">
+                  {
+                    activeDailyTradeInstrument.metricsByBaseline[baseline]
+                      .directionalSummary
+                  }
+                </div>
               </div>
-            </div>
 
-            <button
-              onClick={openCheckpointModal}
-              className="w-full py-2 px-3 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-md transition-colors"
-            >
-              Save Today's #1 Note
-            </button>
-          </div>
-        )}
+              <button
+                onClick={openCheckpointModal}
+                className="w-full py-2 px-3 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-md transition-colors"
+              >
+                Save Today's #1 Note
+              </button>
+            </div>
+          )}
       </aside>
 
       {/* RIGHT-HAND MAIN SAAS WORKSPACE */}
@@ -783,7 +793,10 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => setShowAddTickerModal(true)}
+              onClick={() => {
+                setTickerError('');
+                setShowAddTickerModal(true);
+              }}
               className="px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition-colors inline-flex items-center gap-1 whitespace-nowrap shrink-0"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -791,6 +804,29 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {/* Full-Width Red Error Banner when universe request fails OR when Yahoo market data fails for symbols */}
+        {(universeFetchError || unavailableCount > 0) && (
+          <div
+            role="alert"
+            className="px-6 py-3 bg-rose-600/15 dark:bg-rose-950/80 border-b border-rose-500/40 flex flex-wrap items-center justify-between gap-3 text-xs text-rose-700 dark:text-rose-300"
+          >
+            <div className="flex items-center gap-2 font-medium">
+              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+              <span>
+                {universeFetchError
+                  ? `Market universe failed to load: ${universeFetchError}`
+                  : `Market data unavailable from Yahoo Finance — ${unavailableCount} of ${instruments.length} symbols failed to load real OHLCV data.`}
+              </span>
+            </div>
+            <button
+              onClick={fetchUniverse}
+              className="px-3 py-1 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-md transition-colors shrink-0"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* Visual Refresh Status Clue (Only shown while refreshing or just finished) */}
         {refreshStage !== 'idle' && (
@@ -822,13 +858,31 @@ export default function App() {
           </div>
         )}
 
-        {/* MAIN RIGHT-HAND SPLIT VIEWPORT: Selected Section Data on Left (6 cols) + Dedicated Chart Inspector on Right (6 cols) */}
+        {/* MAIN RIGHT-HAND SPLIT VIEWPORT */}
         <main className="flex-1 p-6 overflow-y-auto">
           {isLoading ? (
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
               <div className="xl:col-span-6 h-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg animate-pulse" />
               <div className="xl:col-span-6 h-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg animate-pulse" />
             </div>
+          ) : universeFetchError ? (
+            <div className="bg-white dark:bg-slate-900 border border-rose-500/30 rounded-lg p-12 text-center space-y-3">
+              <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Unable to Load Market Data
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                {universeFetchError}
+              </p>
+              <button
+                onClick={fetchUniverse}
+                className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-md transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          ) : activeTab === 'shortlist' ? (
+            <PreMarketShortlistView />
           ) : activeTab === 'journal' ? (
             <CheckpointJournalView
               journal={journal}
@@ -964,7 +1018,12 @@ export default function App() {
               </div>
 
               {tickerError && (
-                <div className="text-xs text-rose-500">{tickerError}</div>
+                <div
+                  role="alert"
+                  className="p-2.5 rounded-md bg-rose-500/15 border border-rose-500/30 text-xs text-rose-600 dark:text-rose-400"
+                >
+                  {tickerError}
+                </div>
               )}
 
               <div className="flex items-center justify-end gap-2 pt-2">

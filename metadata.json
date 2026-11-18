@@ -1,0 +1,6 @@
+{
+  "name": "VolFlow — Institutional Volume & Consistency Terminal",
+  "description": "Multi-timeframe stock and sector relative volume (RVOL), consistency scoring, institutional dollar flow, and daily trading checkpoint terminal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
